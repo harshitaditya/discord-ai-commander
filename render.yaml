@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: discord-ai-commander
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot.py
+    envVars:
+      - key: DISCORD_BOT_TOKEN
+        sync: false
+      - key: DISCORD_USERNAME
+        value: aditya_ak02
+      - key: GH_USERNAME
+        value: harshitaditya
+      - key: GH_PAT
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
