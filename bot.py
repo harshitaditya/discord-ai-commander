@@ -4,6 +4,8 @@ import json
 import subprocess
 import urllib.request
 import urllib.error
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from dotenv import load_dotenv
 import discord
 from discord.ext import commands
@@ -541,8 +543,39 @@ async def on_message(message):
                 "• Type `repo <name>` to select one (e.g. `repo Test`)."
             )
 
+# --- Health Check Server for Render 24/7 Hosting ---
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-type", "application/json")
+        self.end_headers()
+        bot_user_str = str(bot.user) if bot.is_ready() else "connecting"
+        payload = {
+            "status": "healthy",
+            "service": "Discord AI Commander",
+            "bot_user": bot_user_str,
+            "models_available": list(GOOGLE_AI_PRO_MODELS.keys()),
+            "message": "Bot is online and ready 24/7!"
+        }
+        self.wfile.write(json.dumps(payload, indent=2).encode("utf-8"))
+
+    def log_message(self, format, *args):
+        # Silence noisy periodic ping logs
+        pass
+
+def run_health_server():
+    port = int(os.environ.get("PORT", 8080))
+    server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
+    print(f"🌍 24/7 Health server listening on port {port} (Render compatible)")
+    server.serve_forever()
+
 if __name__ == "__main__":
     if not DISCORD_BOT_TOKEN:
         print("ERROR: DISCORD_BOT_TOKEN is not set in environment!")
         sys.exit(1)
+
+    # Start health server in daemon thread for Render 24/7 compatibility
+    health_thread = threading.Thread(target=run_health_server, daemon=True)
+    health_thread.start()
+
     bot.run(DISCORD_BOT_TOKEN)
