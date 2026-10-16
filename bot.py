@@ -12,8 +12,19 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from dotenv import load_dotenv
 import discord
 from discord.ext import commands
+import collections
+import shutil
 
 load_dotenv()
+
+BOT_START_TIME = time.time()
+recent_logs = collections.deque(maxlen=60)
+
+def log_event(msg):
+    ts = time.strftime("%Y-%m-%d %H:%M:%S")
+    entry = f"[{ts}] {msg}"
+    print(entry, flush=True)
+    recent_logs.append(entry)
 
 DISCORD_BOT_TOKEN = os.environ.get("DISCORD_BOT_TOKEN")
 DISCORD_USER_ID = os.environ.get("DISCORD_USER_ID")  # Only allow this user
@@ -1356,11 +1367,11 @@ async def on_message(message):
     if message.author.bot:
         return
 
-    print(f"📩 [{message.author}] (ID: {message.author.id}) in {message.channel}: '{message.content}'", flush=True)
+    log_event(f"📩 [{message.author}] (ID: {message.author.id}) in {message.channel}: '{message.content}'")
 
     try:
         if not is_authorized(message.author):
-            print(f"🚫 Blocked unauthorized user: {message.author}", flush=True)
+            log_event(f"🚫 Blocked unauthorized user: {message.author} (ID: {message.author.id})")
             await message.channel.send(
                 f"🔒 **Access Restricted:** You are currently logged in as **{message.author}** (ID: `{message.author.id}`).\n"
                 f"This bot is currently locked to `{DISCORD_USERNAME}`. Update `DISCORD_USERNAME` or `DISCORD_USER_ID` in your `.env` to authorize yourself."
@@ -1515,6 +1526,11 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
             latency = round(bot.latency * 1000, 2)
         except Exception:
             latency = None
+
+        has_git = bool(shutil.which("git") is not None)
+        client_ip = self.client_address[0] if self.client_address else "unknown"
+        user_agent = self.headers.get("User-Agent", "unknown")
+
         payload = {
             "status": "healthy" if (is_ready and not is_closed) else "reconnecting",
             "service": "Discord AI Commander",
@@ -1522,16 +1538,37 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
             "is_ready": is_ready,
             "is_closed": is_closed,
             "latency_ms": latency,
-            "authorized_username": DISCORD_USERNAME,
+            "uptime_seconds": round(time.time() - BOT_START_TIME, 1),
+            "environment": {
+                "has_discord_token": bool(DISCORD_BOT_TOKEN),
+                "has_gemini_key": bool(GEMINI_API_KEY),
+                "has_anthropic_key": bool(ANTHROPIC_API_KEY),
+                "has_gh_pat": bool(GH_PAT),
+                "gh_username": GH_USERNAME,
+                "discord_username": DISCORD_USERNAME,
+                "discord_user_id": DISCORD_USER_ID,
+                "has_git_installed": has_git,
+                "python_version": sys.version.split()[0],
+                "platform": sys.platform
+            },
+            "last_request_from": {
+                "ip": client_ip,
+                "user_agent": user_agent[:100]
+            },
             "guilds": [g.name for g in bot.guilds],
             "models_available": list(ALL_MODELS.keys()),
+            "recent_logs": list(recent_logs),
             "message": "Bot is online and ready 24/7!"
         }
         self.wfile.write(json.dumps(payload, indent=2).encode("utf-8"))
 
     def log_message(self, format, *args):
-        # Silence noisy periodic ping logs
-        pass
+        # Record health ping source in recent_logs
+        try:
+            msg = format % args
+            recent_logs.append(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] HTTP Ping: {msg}")
+        except Exception:
+            pass
 
 def run_health_server():
     port = int(os.environ.get("PORT", 10000))
