@@ -54,11 +54,20 @@ def is_authorized(user):
     if not DISCORD_USER_ID and not DISCORD_USERNAME:
         return True
     user_str_id = str(getattr(user, "id", user))
-    user_name = str(getattr(user, "name", user))
+    user_name = str(getattr(user, "name", ""))
+    display_name = str(getattr(user, "display_name", ""))
+    global_name = str(getattr(user, "global_name", ""))
+    
     if DISCORD_USER_ID and user_str_id == str(DISCORD_USER_ID):
         return True
-    if DISCORD_USERNAME and user_name.lower() == DISCORD_USERNAME.lower():
-        return True
+    if DISCORD_USERNAME:
+        target = DISCORD_USERNAME.strip().lower()
+        if (user_name.lower() == target or 
+            display_name.lower() == target or 
+            global_name.lower() == target):
+            return True
+
+    print(f"⚠️ Unauthorized attempt: id={user_str_id}, name='{user_name}', display='{display_name}', global='{global_name}' (expected: {DISCORD_USERNAME})", flush=True)
     return False
 
 # --- GitHub Helpers ---
@@ -484,6 +493,10 @@ async def on_message(message):
     if message.author.bot:
         return
     if not is_authorized(message.author):
+        await message.channel.send(
+            f"🔒 **Access Restricted:** You are currently logged in as **{message.author}** (ID: `{message.author.id}`).\n"
+            f"This bot is currently locked to `{DISCORD_USERNAME}`. Update `DISCORD_USERNAME` or `DISCORD_USER_ID` in your `.env` to authorize yourself."
+        )
         return
 
     ctx = await bot.get_context(message)
