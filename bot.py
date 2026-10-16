@@ -1032,9 +1032,8 @@ if __name__ == "__main__":
     health_thread = threading.Thread(target=run_health_server, daemon=True)
     health_thread.start()
 
-    while True:
-        try:
-            bot.run(DISCORD_BOT_TOKEN)
-        except Exception as e:
-            print(f"⚠️ bot.run exited with: {e}. Reconnecting in 5s...", flush=True)
-            time.sleep(5)
+    try:
+        bot.run(DISCORD_BOT_TOKEN)
+    except Exception as e:
+        print(f"⚠️ bot.run exited with: {e}. Exiting for clean process supervisor restart.", flush=True)
+        sys.exit(1)
