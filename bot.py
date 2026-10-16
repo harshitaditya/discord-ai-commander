@@ -1032,8 +1032,21 @@ if __name__ == "__main__":
     health_thread = threading.Thread(target=run_health_server, daemon=True)
     health_thread.start()
 
-    try:
-        bot.run(DISCORD_BOT_TOKEN)
-    except Exception as e:
-        print(f"⚠️ bot.run exited with: {e}. Exiting for clean process supervisor restart.", flush=True)
-        sys.exit(1)
+    while True:
+        try:
+            bot.run(DISCORD_BOT_TOKEN)
+            break
+        except discord.HTTPException as e:
+            if getattr(e, "status", None) == 429:
+                print(f"⏳ Discord API 429 (Temporary Cloudflare Rate Limit). Backing off for 60s before retrying...", flush=True)
+                time.sleep(60)
+            else:
+                print(f"⚠️ Discord HTTP error: {e}. Retrying in 15s...", flush=True)
+                time.sleep(15)
+            script_path = os.path.abspath(__file__)
+            os.execv(sys.executable, [sys.executable, script_path])
+        except Exception as e:
+            print(f"⚠️ bot.run exited with: {e}. Retrying in 15s...", flush=True)
+            time.sleep(15)
+            script_path = os.path.abspath(__file__)
+            os.execv(sys.executable, [sys.executable, script_path])
