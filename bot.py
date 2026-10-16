@@ -866,6 +866,8 @@ async def start_studio_flow(destination, user_id):
 # --- Bot Commands ---
 @bot.event
 async def on_ready():
+    log_event(f"🤖 Discord AI Commander is READY as {bot.user} (ID: {bot.user.id})!")
+    log_event(f"🔗 Connected to {len(bot.guilds)} guilds, authorized username: '{DISCORD_USERNAME}'")
     print(f"🤖 Discord AI Commander is READY as {bot.user} (ID: {bot.user.id})!", flush=True)
     print(f"🔗 Connected to {len(bot.guilds)} guilds, authorized username: '{DISCORD_USERNAME}'", flush=True)
 
@@ -1553,6 +1555,14 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         except Exception as ge:
             gh_status = f"error: {ge}"
 
+        last_error = "none"
+        if os.path.exists("/tmp/discord_bot_last_error.log"):
+            try:
+                with open("/tmp/discord_bot_last_error.log", "r") as ef:
+                    last_error = ef.read().strip()
+            except Exception:
+                pass
+
         payload = {
             "status": "healthy" if (is_ready and not is_closed) else "reconnecting",
             "service": "Discord AI Commander",
@@ -1560,6 +1570,7 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
             "is_ready": is_ready,
             "is_closed": is_closed,
             "latency_ms": latency,
+            "last_bot_error": last_error,
             "uptime_seconds": round(time.time() - BOT_START_TIME, 1),
             "environment": {
                 "has_discord_token": bool(DISCORD_BOT_TOKEN),
@@ -1630,15 +1641,29 @@ if __name__ == "__main__":
             bot.run(DISCORD_BOT_TOKEN)
             break
         except discord.HTTPException as e:
+            err_msg = f"HTTPException (status={getattr(e, 'status', None)}): {e}"
+            try:
+                with open("/tmp/discord_bot_last_error.log", "w") as ef:
+                    ef.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {err_msg}")
+            except Exception:
+                pass
             if getattr(e, "status", None) == 429:
-                print(f"⏳ Discord API 429 (Temporary Cloudflare Rate Limit). Backing off for 60s before retrying...", flush=True)
-                time.sleep(60)
+                retry_after = getattr(e, "retry_after", None)
+                wait_time = max(int(retry_after) if retry_after else 180, 180)
+                print(f"⏳ Discord API 429 (Temporary Cloudflare Rate Limit). Backing off for {wait_time}s before retrying...", flush=True)
+                time.sleep(wait_time)
             else:
                 print(f"⚠️ Discord HTTP error: {e}. Retrying in 15s...", flush=True)
                 time.sleep(15)
             script_path = os.path.abspath(__file__)
             os.execv(sys.executable, [sys.executable, script_path])
         except Exception as e:
+            err_msg = f"{type(e).__name__}: {e}"
+            try:
+                with open("/tmp/discord_bot_last_error.log", "w") as ef:
+                    ef.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {err_msg}")
+            except Exception:
+                pass
             print(f"⚠️ bot.run exited with: {e}. Retrying in 15s...", flush=True)
             time.sleep(15)
             script_path = os.path.abspath(__file__)
