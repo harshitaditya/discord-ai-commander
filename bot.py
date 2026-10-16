@@ -24,9 +24,12 @@ DISCORD_USERNAME = os.environ.get("DISCORD_USERNAME", "aditya_ak02")
 # All supported AI Models
 ALL_MODELS = {
     "gemini-3.8-flash": "⚡ Gemini 3.8 Flash (High — Super Fast & Smart) [DEFAULT]",
+    "gemini-3.5-flash-lite": "⚡ Gemini 3.5 Flash Lite (Ultra Fast & Lightweight)",
+    "gemini-3.1-pro": "🧠 Gemini 3.1 Pro (Deep Logic & Complex Architecture)",
+    "gemini-4-argon": "🔮 Gemini 4 Argon (Next-Gen Autonomous Agentic Engine)",
     "claude-sonnet-4-6": "🎭 Claude Sonnet 4.6 (Elite Coding & Refactoring)",
     "claude-opus-4-6": "👑 Claude Opus 4.6 (Deep Architectural Reasoning)",
-    "gemini-2.5-pro": "🧠 Gemini 2.5 Pro (Deep Reasoning & Architecture)",
+    "gemini-2.5-pro": "🧠 Gemini 2.5 Pro (Flagship Reasoning & Architecture)",
     "gemini-2.5-flash": "🚀 Gemini 2.5 Flash (Flagship Speed)",
     "gemini-2.0-flash": "⚡ Gemini 2.0 Flash (Next-Gen Fast)",
     "gemini-1.5-pro": "📚 Gemini 1.5 Pro (Massive 2M Context Window)",
@@ -123,7 +126,12 @@ def gather_repo_files(repo_dir, max_files=60, max_total_bytes=300_000):
 
 # --- AI Calling (Gemini & Claude) ---
 def call_gemini(prompt, system_instruction, model_name="gemini-3.8-flash"):
-    models_to_try = [model_name, "gemini-2.5-flash", "gemini-1.5-flash"]
+    preferred = [model_name]
+    fallbacks = ["gemini-3.8-flash", "gemini-2.5-flash", "gemini-2.5-pro", "gemini-1.5-flash"]
+    models_to_try = []
+    for m in preferred + fallbacks:
+        if m not in models_to_try:
+            models_to_try.append(m)
     last_err = None
 
     for m in models_to_try:
@@ -181,7 +189,6 @@ def call_ai(prompt, system_instruction, model_name="gemini-3.8-flash"):
             except Exception as e:
                 print(f"Anthropic API error: {e}, falling back to Gemini Pro...", flush=True)
 
-        # Fallback to Gemini 2.5 Pro with Claude persona
         persona = (
             f"You are {model_name}, an elite software engineer. "
             "Think deeply and generate clean, bug-free production-grade modifications. "
@@ -246,7 +253,7 @@ class StudioModelSelect(discord.ui.Select):
         session["active_model"] = selected_model
         repo = session.get("active_repo", "your repository")
 
-        # Advance to Step 3: Prompt for Task
+        # Advance to Step 3: Prompt for Task with Control Buttons
         embed = discord.Embed(
             title="🎯 Step 3 of 3: Dev Studio Ready!",
             description=(
@@ -265,12 +272,74 @@ class StudioModelSelect(discord.ui.Select):
             color=discord.Color.purple()
         )
         embed.set_footer(text="Type 'fix: <task>' in chat now to start coding!")
-        await interaction.response.edit_message(embed=embed, view=None)
+        view = StudioControlView(interaction.user.id)
+        await interaction.response.edit_message(embed=embed, view=view)
 
 class StudioModelView(discord.ui.View):
     def __init__(self, current_model):
         super().__init__(timeout=180)
         self.add_item(StudioModelSelect(current_model))
+
+class StudioControlView(discord.ui.View):
+    """Control buttons for active workspace (Switch Model, Switch Repo, Restart, Close)."""
+    def __init__(self, user_id):
+        super().__init__(timeout=600)
+        self.user_id = user_id
+
+    @discord.ui.button(label="Switch Model", style=discord.ButtonStyle.blurple, emoji="🧠")
+    async def switch_model_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("❌ This is not your session.", ephemeral=True)
+            return
+        session = get_session(self.user_id)
+        view = StudioModelView(session.get("active_model", "gemini-3.8-flash"))
+        embed = discord.Embed(
+            title="🧠 Switch AI Model",
+            description="Select which model you want to switch to:",
+            color=discord.Color.blue()
+        )
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+    @discord.ui.button(label="Switch Repo", style=discord.ButtonStyle.gray, emoji="📁")
+    async def switch_repo_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("❌ This is not your session.", ephemeral=True)
+            return
+        repos = fetch_user_repos()
+        view = StudioRepoView(repos)
+        embed = discord.Embed(
+            title="📁 Switch Repository",
+            description="Select which repository to switch to:",
+            color=discord.Color.green()
+        )
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+    @discord.ui.button(label="Restart Chat", style=discord.ButtonStyle.gray, emoji="🔄")
+    async def restart_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("❌ This is not your session.", ephemeral=True)
+            return
+        session = get_session(self.user_id)
+        if session.get("work_dir") and os.path.exists(session["work_dir"]):
+            subprocess.run(["rm", "-rf", session["work_dir"]])
+        session["active_repo"] = None
+        session["pending_summary"] = None
+        session["pending_files"] = []
+        await interaction.response.send_message("🔄 Restarting studio...", ephemeral=True)
+        await start_studio_flow(interaction.channel, self.user_id)
+
+    @discord.ui.button(label="Close Chat", style=discord.ButtonStyle.red, emoji="❌")
+    async def close_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("❌ This is not your session.", ephemeral=True)
+            return
+        session = get_session(self.user_id)
+        if session.get("work_dir") and os.path.exists(session["work_dir"]):
+            subprocess.run(["rm", "-rf", session["work_dir"]])
+        session["active_repo"] = None
+        session["pending_summary"] = None
+        session["pending_files"] = []
+        await interaction.response.send_message("👋 Chat session closed! Type `lets code` anytime to start again.", ephemeral=False)
 
 class PushActionView(discord.ui.View):
     def __init__(self, user_id):
@@ -327,7 +396,35 @@ class PushActionView(discord.ui.View):
         except Exception as e:
             await interaction.followup.send(f"❌ Error during push: {e}")
 
-    @discord.ui.button(label="❌ Discard Changes", style=discord.ButtonStyle.red)
+    @discord.ui.button(label="Switch Model", style=discord.ButtonStyle.blurple, emoji="🧠")
+    async def switch_model_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("❌ This is not your session.", ephemeral=True)
+            return
+        session = get_session(self.user_id)
+        view = StudioModelView(session.get("active_model", "gemini-3.8-flash"))
+        embed = discord.Embed(
+            title="🧠 Switch AI Model",
+            description="Select which model you want to use:",
+            color=discord.Color.blue()
+        )
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+    @discord.ui.button(label="Restart Chat", style=discord.ButtonStyle.gray, emoji="🔄")
+    async def restart_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("❌ This is not your session.", ephemeral=True)
+            return
+        session = get_session(self.user_id)
+        if session.get("work_dir") and os.path.exists(session["work_dir"]):
+            subprocess.run(["rm", "-rf", session["work_dir"]])
+        session["active_repo"] = None
+        session["pending_summary"] = None
+        session["pending_files"] = []
+        await interaction.response.send_message("🔄 Restarting studio...", ephemeral=True)
+        await start_studio_flow(interaction.channel, self.user_id)
+
+    @discord.ui.button(label="Close / Discard", style=discord.ButtonStyle.red, emoji="❌")
     async def cancel_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.user_id:
             await interaction.response.send_message("❌ This is not your session.", ephemeral=True)
@@ -337,7 +434,7 @@ class PushActionView(discord.ui.View):
             subprocess.run(["rm", "-rf", session["work_dir"]])
         session["pending_summary"] = None
         session["pending_files"] = []
-        await interaction.response.send_message("🗑️ Changes discarded. Type `lets code` to start a new task.", ephemeral=True)
+        await interaction.response.send_message("🗑️ Changes discarded & session closed. Type `lets code` to start fresh.", ephemeral=False)
 
 # --- Studio Initiation Helper ---
 async def start_studio_flow(destination, user_id):
@@ -373,12 +470,13 @@ async def help_cmd(ctx):
     embed.add_field(name="lets code", value="Start the interactive 3-step coding studio (Repo ➔ Model ➔ Task)", inline=False)
     embed.add_field(name="fix: <task>", value="Instruct the AI to read your repo and implement code edits", inline=False)
     embed.add_field(name="push", value="Commit & push your code to GitHub (triggers Render live auto-deploy)", inline=False)
+    embed.add_field(name="switch model / model", value="Open menu to change model (Gemini 3.8 Flash, 3.5 Flash Lite, 3.1 Pro, 4 Argon, Claude Sonnet 4.6, Claude Opus 4.6, etc.)", inline=False)
+    embed.add_field(name="restart / restart chat", value="Restart the studio session from Step 1", inline=False)
+    embed.add_field(name="close / close chat", value="Close current session and clean workspace", inline=False)
     embed.add_field(name="repos", value="List all your 26+ GitHub repositories", inline=False)
     embed.add_field(name="repo <name>", value="Switch active repository directly", inline=False)
-    embed.add_field(name="model", value="Switch AI Model (Gemini 3.8 Flash, Claude Sonnet 4.6, Claude Opus 4.6, etc.)", inline=False)
     embed.add_field(name="status", value="Show active repository, branch, and model", inline=False)
-    embed.add_field(name="reset", value="Clear active workspace and pending changes", inline=False)
-    embed.set_footer(text="Commands work in ANY case: upper, lower, or mixed!")
+    embed.set_footer(text="All commands work in ANY case: upper, lower, or mixed!")
     await ctx.send(embed=embed)
 
 @bot.command(name="status")
@@ -391,7 +489,7 @@ async def status_cmd(ctx):
     embed.add_field(name="Branch", value=f"`{session.get('active_branch')}`", inline=True)
     embed.add_field(name="Active Model", value=f"`{session.get('active_model')}`", inline=False)
     embed.add_field(name="Pending Changes", value=f"{len(session.get('pending_files', []))} files modified", inline=True)
-    embed.set_footer(text="Type 'lets code' to start or switch project")
+    embed.set_footer(text="Type 'lets code' to start or 'switch model' to change model")
     await ctx.send(embed=embed)
 
 @bot.command(name="repos")
@@ -613,7 +711,7 @@ async def reset_cmd(ctx):
         "pending_files": [],
         "work_dir": None
     }
-    await ctx.send("🧹 Session reset. Type **`lets code`** to start fresh!")
+    await ctx.send("🧹 Session closed & reset. Type **`lets code`** anytime to start fresh!")
 
 # --- Natural Language Message Handler (ANY CASE: Lower, Upper, Mixed!) ---
 @bot.event
@@ -642,12 +740,39 @@ async def on_message(message):
         raw_content = message.content.strip()
         content_lower = raw_content.lower()
 
-        # 1. "lets code" studio trigger (Works in ANY case: LETS CODE, Lets Code, let's code, etc.)
-        if content_lower in ["lets code", "let's code", "lets_code", "start coding", "start code", "code"]:
+        # 1. Close Chat / Stop / Exit (Works in ANY case: CLOSE, Close Chat, EXIT, QUIT, STOP)
+        if content_lower in ["close", "close chat", "exit", "quit", "stop", "end chat", "bye", "reset", "clear", "cancel"]:
+            await reset_cmd(ctx)
+            return
+
+        # 2. Restart Chat / Studio (Works in ANY case: RESTART, Restart Chat, REBOOT, etc.)
+        if content_lower in ["restart", "restart chat", "re-start", "restart session", "reset chat", "reboot"]:
+            session = get_session(message.author.id)
+            if session.get("work_dir") and os.path.exists(session["work_dir"]):
+                subprocess.run(["rm", "-rf", session["work_dir"]])
+            session["active_repo"] = None
+            session["pending_summary"] = None
+            session["pending_files"] = []
+            await message.channel.send("🔄 Restarting studio session...")
             await start_studio_flow(message.channel, message.author.id)
             return
 
-        # 2. "fix: <task>" handler (Works in ANY case: FIX:, Fix:, fIx:, fix <task>)
+        # 3. Switch Model (Works in ANY case: SWITCH MODEL, Switch Model, CHANGE MODEL, MODEL, MODELS)
+        if content_lower in ["switch model", "change model", "model", "models", "select model", "choose model"]:
+            await model_cmd(ctx)
+            return
+
+        # 4. Switch Repo (Works in ANY case: SWITCH REPO, Change Repo, CHOOSE REPO)
+        if content_lower in ["switch repo", "change repo", "choose repo", "select repo"]:
+            await start_studio_flow(message.channel, message.author.id)
+            return
+
+        # 5. "lets code" studio trigger (Works in ANY case: LETS CODE, Lets Code, let's code, etc.)
+        if content_lower in ["lets code", "let's code", "lets_code", "start coding", "start code", "code", "start"]:
+            await start_studio_flow(message.channel, message.author.id)
+            return
+
+        # 6. "fix: <task>" handler (Works in ANY case: FIX:, Fix:, fIx:, fix <task>)
         is_fix = False
         task_desc = ""
         for prefix in ["fix:", "fix :", "fix "]:
@@ -663,8 +788,8 @@ async def on_message(message):
             await code_cmd(ctx, task=task_desc)
             return
 
-        # 3. "push and deploy" handler (Works in ANY case: PUSH, DEPLOY, push and deploy, etc.)
-        if content_lower in ["push", "deploy", "push and deploy", "push & deploy", "push code", "deploy code"]:
+        # 7. "push and deploy" handler (Works in ANY case: PUSH, DEPLOY, push and deploy, etc.)
+        if content_lower in ["push", "deploy", "push and deploy", "push & deploy", "push code", "deploy code", "publish"]:
             await push_cmd(ctx)
             return
         elif content_lower.startswith("push ") or content_lower.startswith("deploy "):
@@ -677,17 +802,13 @@ async def on_message(message):
             await push_cmd(ctx, commit_message=custom_comment)
             return
 
-        # 4. Other natural shortcuts (ANY CASE)
+        # 8. Other natural shortcuts (ANY CASE)
         if content_lower in ["help", "commands"]:
             await help_cmd(ctx)
         elif content_lower in ["repos", "show repos", "list repos", "my repos", "all repos"]:
             await repos_cmd(ctx)
-        elif content_lower in ["model", "models", "select model", "change model"]:
-            await model_cmd(ctx)
         elif content_lower in ["status", "info", "session"]:
             await status_cmd(ctx)
-        elif content_lower in ["reset", "clear", "cancel"]:
-            await reset_cmd(ctx)
         elif content_lower == "repo":
             await ctx.send("⚠️ Please specify a repository name! Example: `repo RetroRaag` or type `lets code`")
         elif content_lower.startswith("repo "):
@@ -707,7 +828,9 @@ async def on_message(message):
                 await message.channel.send(
                     f"💡 Active Repo: `{session.get('active_repo')}` (`{session.get('active_branch')}`)\n"
                     f"👉 To edit code, type: **`fix: {raw_content}`**\n"
-                    f"👉 To switch repo or model, type: **`lets code`**\n"
+                    f"👉 To switch model, type: **`switch model`**\n"
+                    f"👉 To restart session, type: **`restart`**\n"
+                    f"👉 To close chat, type: **`close`**\n"
                     f"👉 To push changes, type: **`push`**"
                 )
             else:
