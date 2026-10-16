@@ -106,7 +106,7 @@ def fetch_user_repos():
             data = json.loads(resp.read().decode("utf-8"))
             return [r["name"] for r in data]
     except Exception as e:
-        print(f"Error fetching repos from GitHub: {e}", flush=True)
+        log_event(f"❌ Error fetching repos from GitHub: {e}")
         return []
 
 def gather_repo_files(repo_dir, task_query="", max_files=35, max_total_bytes=45_000):
@@ -841,8 +841,11 @@ class ChatDecisionView(discord.ui.View):
 # --- Studio Initiation Helper ---
 async def start_studio_flow(destination, user_id):
     """Entrypoint when user says 'lets code'."""
-    repos = fetch_user_repos()
+    log_event(f"🚀 start_studio_flow triggered for user_id={user_id}")
+    repos = await asyncio.to_thread(fetch_user_repos)
+    log_event(f"📦 fetch_user_repos returned {len(repos)} repos")
     if not repos:
+        log_event("⚠️ fetch_user_repos returned empty list or error")
         await destination.send("⚠️ Could not fetch repositories from GitHub. Please check your GitHub token.")
         return
 
@@ -856,7 +859,9 @@ async def start_studio_flow(destination, user_id):
     )
     embed.set_footer(text="Step 1 of 3: Choose Repository")
     view = StudioRepoView(repos)
-    await destination.send(embed=embed, view=view)
+    log_event(f"📤 Sending StudioRepoView with {len(repos[:25])} options to {destination}...")
+    sent_msg = await destination.send(embed=embed, view=view)
+    log_event(f"✅ StudioRepoView sent successfully! Message ID: {sent_msg.id}")
 
 # --- Bot Commands ---
 @bot.event
@@ -1506,16 +1511,22 @@ async def on_message(message):
             await chat_with_agent(message, ctx, raw_content)
 
     except Exception as e:
-        print(f"❌ Error handling message: {e}", flush=True)
         import traceback
-        traceback.print_exc()
+        tb = traceback.format_exc()
+        log_event(f"❌ Exception in on_message: {type(e).__name__}: {e}")
+        log_event(f"Traceback: {tb.splitlines()[-1] if tb.splitlines() else 'N/A'}")
         try:
             await message.channel.send(f"⚠️ Error processing command: `{e}`")
-        except Exception:
-            pass
+        except Exception as e2:
+            log_event(f"❌ Failed to send error message to channel: {e2}")
 
 # --- Health Check Server for Render 24/7 Hosting ---
 class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_HEAD(self):
+        self.send_response(200)
+        self.send_header("Content-type", "application/json")
+        self.end_headers()
+
     def do_GET(self):
         self.send_response(200)
         self.send_header("Content-type", "application/json")
@@ -1531,6 +1542,15 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         client_ip = self.client_address[0] if self.client_address else "unknown"
         user_agent = self.headers.get("User-Agent", "unknown")
 
+        gh_status = "untested"
+        try:
+            test_url = f"https://api.github.com/users/{GH_USERNAME}"
+            test_req = urllib.request.Request(test_url, headers={"Accept": "application/vnd.github.v3+json", "Authorization": f"token {GH_PAT}"} if GH_PAT else {})
+            with urllib.request.urlopen(test_req, timeout=5) as tr:
+                gh_status = f"ok (HTTP {tr.status})"
+        except Exception as ge:
+            gh_status = f"error: {ge}"
+
         payload = {
             "status": "healthy" if (is_ready and not is_closed) else "reconnecting",
             "service": "Discord AI Commander",
@@ -1544,6 +1564,7 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
                 "has_gemini_key": bool(GEMINI_API_KEY),
                 "has_anthropic_key": bool(ANTHROPIC_API_KEY),
                 "has_gh_pat": bool(GH_PAT),
+                "gh_token_status": gh_status,
                 "gh_username": GH_USERNAME,
                 "discord_username": DISCORD_USERNAME,
                 "discord_user_id": DISCORD_USER_ID,
