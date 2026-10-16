@@ -25,10 +25,11 @@ DISCORD_USERNAME = os.environ.get("DISCORD_USERNAME", "aditya_ak02")
 
 # All supported AI Models (Active & Tested)
 ALL_MODELS = {
-    "gemini-3.6-flash": "⚡ Gemini 3.6 Flash (Super Fast & Highly Reliable) [DEFAULT]",
-    "gemini-3.7-flash": "⚡ Gemini 3.7 Flash (Hybrid Fast & High Accuracy)",
+    "gemini-3.5-flash-lite": "⚡ Gemini 3.5 Flash Lite (Ultra Fast & 0% Throttling) [DEFAULT]",
+    "gemini-3.5-flash": "🚀 Gemini 3.5 Flash (Flagship Speed & Capacity)",
+    "gemini-3.6-flash": "⚡ Gemini 3.6 Flash (Super Fast & Smart)",
+    "gemini-3-flash-preview": "🛡️ Gemini 3 Flash Preview (Rock Solid Fallback)",
     "gemini-3.8-flash": "⚡ Gemini 3.8 Flash (Latest Flash)",
-    "gemini-3.5-flash-lite": "⚡ Gemini 3.5 Flash Lite (Ultra Fast & Lightweight)",
     "gemini-3.1-pro": "🧠 Gemini 3.1 Pro (Deep Logic & Complex Architecture)",
     "gemini-4-argon": "🔮 Gemini 4 Argon (Next-Gen Autonomous Agentic Engine)",
     "claude-sonnet-4-6": "🎭 Claude Sonnet 4.6 (Elite Coding & Refactoring)",
@@ -47,7 +48,7 @@ def get_session(user_id):
         user_sessions[user_id] = {
             "active_repo": None,
             "active_branch": "main",
-            "active_model": "gemini-3.6-flash",
+            "active_model": "gemini-3.5-flash-lite",
             "pending_summary": None,
             "pending_files": [],
             "work_dir": None
@@ -91,38 +92,70 @@ def fetch_user_repos():
         print(f"Error fetching repos from GitHub: {e}", flush=True)
         return []
 
-def gather_repo_files(repo_dir, max_files=60, max_total_bytes=300_000):
-    """Recursively collect source files to feed into AI prompt."""
+def gather_repo_files(repo_dir, task_query="", max_files=35, max_total_bytes=45_000):
+    """Recursively collect source files prioritized by task relevance to prevent API 503 throttling."""
     file_map = {}
     ignored_dirs = {".git", "node_modules", "vendor", "__pycache__", ".vscode", "dist", "build", ".next", ".cache", "venv", ".idea"}
-    ignored_exts = {".png", ".jpg", ".jpeg", ".gif", ".ico", ".svg", ".zip", ".tar", ".gz", ".lock", ".woff", ".woff2", ".ttf", ".pdf", ".exe", ".bin"}
+    ignored_exts = {".png", ".jpg", ".jpeg", ".gif", ".ico", ".svg", ".zip", ".tar", ".gz", ".lock", ".woff", ".woff2", ".ttf", ".pdf", ".exe", ".bin", ".map", ".log"}
+    ignored_files = {"package-lock.json", "yarn.lock", "pnpm-lock.yaml", "composer.lock", "Cargo.lock", "catalogBuildCache.json"}
 
-    total_bytes = 0
-    count = 0
+    task_words = set(task_query.lower().split()) if task_query else set()
+    is_styling = any(w in task_query.lower() for w in ["css", "style", "design", "ui", "theme", "color", "layout"])
+
+    all_paths = []
+    candidates = []
 
     for root, dirs, files in os.walk(repo_dir):
         dirs[:] = [d for d in dirs if d not in ignored_dirs]
         for f in files:
+            full_path = os.path.join(root, f)
+            rel_path = os.path.relpath(full_path, repo_dir)
+            all_paths.append(rel_path)
+
+            if f in ignored_files or f.endswith(".lock"):
+                continue
             ext = os.path.splitext(f)[1].lower()
             if ext in ignored_exts:
                 continue
-            if count >= max_files:
-                break
-            full_path = os.path.join(root, f)
-            rel_path = os.path.relpath(full_path, repo_dir)
+            if ext == ".css" and not is_styling and os.path.getsize(full_path) > 10_000:
+                continue
+
             try:
                 size = os.path.getsize(full_path)
-                if size > 150_000:
+                if size > 60_000:
                     continue
-                with open(full_path, "r", encoding="utf-8", errors="ignore") as fp:
-                    content = fp.read()
-                if total_bytes + len(content) <= max_total_bytes:
-                    file_map[rel_path] = content
-                    total_bytes += len(content)
-                    count += 1
+
+                path_lower = rel_path.lower()
+                score = 0
+                for w in task_words:
+                    if len(w) > 2 and w in path_lower:
+                        score += 10
+                if ext in [".js", ".jsx", ".ts", ".tsx", ".py", ".json", ".html"]:
+                    score += 1
+                candidates.append((score, rel_path, full_path, size))
             except Exception:
                 pass
-    return file_map
+
+    candidates.sort(key=lambda x: (-x[0], x[3]))
+
+    total_bytes = 0
+    for score, rel_path, full_path, size in candidates:
+        if len(file_map) >= max_files:
+            break
+        try:
+            with open(full_path, "r", encoding="utf-8", errors="ignore") as fp:
+                content = fp.read()
+            if total_bytes + len(content) <= max_total_bytes:
+                file_map[rel_path] = content
+                total_bytes += len(content)
+            elif len(file_map) == 0:
+                file_map[rel_path] = content[:max_total_bytes]
+                total_bytes += len(file_map[rel_path])
+                break
+        except Exception:
+            pass
+
+    return file_map, all_paths
 
 MODEL_ALIASES = {
     "gemini-3.1-pro": "gemini-3.1-pro-preview",
@@ -163,12 +196,13 @@ def enrich_task_with_external_links(task_text):
 
     return task_text + extra_context
 
-def call_gemini(prompt, system_instruction, model_name="gemini-3.6-flash"):
+def call_gemini(prompt, system_instruction, model_name="gemini-3.5-flash-lite"):
     mapped_target = MODEL_ALIASES.get(model_name, model_name)
     active_fallbacks = [
-        "gemini-3.6-flash",
-        "gemini-3.7-flash",
         "gemini-3.5-flash-lite",
+        "gemini-3.5-flash",
+        "gemini-3-flash-preview",
+        "gemini-3.6-flash",
         "gemini-flash-lite-latest",
         "gemini-3.8-flash",
     ]
@@ -184,7 +218,7 @@ def call_gemini(prompt, system_instruction, model_name="gemini-3.6-flash"):
         }
         req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers={"Content-Type": "application/json"})
         try:
-            with urllib.request.urlopen(req, timeout=120) as resp:
+            with urllib.request.urlopen(req, timeout=60) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
                 text_response = data["candidates"][0]["content"]["parts"][0]["text"].strip()
                 if text_response.startswith("```json"):
@@ -198,6 +232,7 @@ def call_gemini(prompt, system_instruction, model_name="gemini-3.6-flash"):
         except Exception as e:
             print(f"Error calling {m}: {e}", flush=True)
             last_err = e
+            time.sleep(1)
 
     raise RuntimeError(f"Gemini API error. Last error: {last_err}")
 
@@ -227,7 +262,7 @@ def call_anthropic(prompt, system_instruction, model_name="claude-3-7-sonnet-202
             text = text[:-3]
         return json.loads(text.strip()), model_name
 
-def call_ai(prompt, system_instruction, model_name="gemini-3.6-flash"):
+def call_ai(prompt, system_instruction, model_name="gemini-3.5-flash-lite"):
     """Unified AI caller supporting Gemini and Claude models."""
     if model_name in ["claude-sonnet-4-6", "claude-opus-4-6"]:
         if ANTHROPIC_API_KEY:
@@ -241,7 +276,7 @@ def call_ai(prompt, system_instruction, model_name="gemini-3.6-flash"):
             f"You are {model_name}, an elite software engineer. "
             "Think deeply and generate clean, bug-free production-grade modifications. "
         )
-        return call_gemini(prompt, persona + system_instruction, "gemini-3.6-flash")
+        return call_gemini(prompt, persona + system_instruction, "gemini-3.5-flash-lite")
 
     return call_gemini(prompt, system_instruction, model_name)
 
@@ -649,9 +684,9 @@ async def code_cmd(ctx, *, task: str):
 
     model_label = ALL_MODELS.get(model_name, model_name)
     await status_msg.edit(content=f"⏳ **Reading project files and consulting `{model_label}`...**")
-    file_map = await asyncio.to_thread(gather_repo_files, work_dir)
     enriched_task = await asyncio.to_thread(enrich_task_with_external_links, task)
-    file_list = "\n".join([f"- {p}" for p in file_map.keys()])
+    file_map, all_repo_paths = await asyncio.to_thread(gather_repo_files, work_dir, task)
+    file_list = "\n".join([f"- {p}" for p in all_repo_paths])
 
     system_instruction = (
         "You are an expert autonomous software engineer. "
