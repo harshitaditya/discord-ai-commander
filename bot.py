@@ -7,6 +7,7 @@ import urllib.error
 import threading
 import time
 import asyncio
+import re
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from dotenv import load_dotenv
 import discord
@@ -22,18 +23,16 @@ GH_PAT = os.environ.get("GH_PAT")
 GH_USERNAME = os.environ.get("GH_USERNAME", "harshitaditya")
 DISCORD_USERNAME = os.environ.get("DISCORD_USERNAME", "aditya_ak02")
 
-# All supported AI Models
+# All supported AI Models (Active & Tested)
 ALL_MODELS = {
-    "gemini-3.8-flash": "⚡ Gemini 3.8 Flash (High — Super Fast & Smart) [DEFAULT]",
+    "gemini-3.6-flash": "⚡ Gemini 3.6 Flash (Super Fast & Highly Reliable) [DEFAULT]",
+    "gemini-3.7-flash": "⚡ Gemini 3.7 Flash (Hybrid Fast & High Accuracy)",
+    "gemini-3.8-flash": "⚡ Gemini 3.8 Flash (Latest Flash)",
     "gemini-3.5-flash-lite": "⚡ Gemini 3.5 Flash Lite (Ultra Fast & Lightweight)",
     "gemini-3.1-pro": "🧠 Gemini 3.1 Pro (Deep Logic & Complex Architecture)",
     "gemini-4-argon": "🔮 Gemini 4 Argon (Next-Gen Autonomous Agentic Engine)",
     "claude-sonnet-4-6": "🎭 Claude Sonnet 4.6 (Elite Coding & Refactoring)",
     "claude-opus-4-6": "👑 Claude Opus 4.6 (Deep Architectural Reasoning)",
-    "gemini-2.5-pro": "🧠 Gemini 2.5 Pro (Flagship Reasoning & Architecture)",
-    "gemini-2.5-flash": "🚀 Gemini 2.5 Flash (Flagship Speed)",
-    "gemini-2.0-flash": "⚡ Gemini 2.0 Flash (Next-Gen Fast)",
-    "gemini-1.5-pro": "📚 Gemini 1.5 Pro (Massive 2M Context Window)",
 }
 
 intents = discord.Intents.default()
@@ -48,7 +47,7 @@ def get_session(user_id):
         user_sessions[user_id] = {
             "active_repo": None,
             "active_branch": "main",
-            "active_model": "gemini-3.8-flash",
+            "active_model": "gemini-3.6-flash",
             "pending_summary": None,
             "pending_files": [],
             "work_dir": None
@@ -125,14 +124,55 @@ def gather_repo_files(repo_dir, max_files=60, max_total_bytes=300_000):
                 pass
     return file_map
 
-# --- AI Calling (Gemini & Claude) ---
-def call_gemini(prompt, system_instruction, model_name="gemini-3.8-flash"):
-    preferred = [model_name]
-    fallbacks = ["gemini-3.8-flash", "gemini-2.5-flash", "gemini-2.5-pro", "gemini-1.5-flash"]
-    models_to_try = []
-    for m in preferred + fallbacks:
-        if m not in models_to_try:
-            models_to_try.append(m)
+MODEL_ALIASES = {
+    "gemini-3.1-pro": "gemini-3.1-pro-preview",
+    "gemini-2.5-pro": "gemini-3.6-flash",
+    "gemini-2.5-flash": "gemini-3.6-flash",
+    "gemini-2.0-flash": "gemini-3.6-flash",
+    "gemini-1.5-pro": "gemini-3.6-flash",
+    "gemini-1.5-flash": "gemini-3.6-flash",
+}
+
+def enrich_task_with_external_links(task_text):
+    """If task contains a Spotify playlist or web link, extract track names or page text to augment prompt."""
+    extra_context = ""
+    # Check for Spotify playlist
+    spotify_playlist_match = re.search(r"https?://open\.spotify\.com/playlist/([a-zA-Z0-9]+)", task_text)
+    if spotify_playlist_match:
+        playlist_id = spotify_playlist_match.group(1)
+        embed_url = f"https://open.spotify.com/embed/playlist/{playlist_id}"
+        req = urllib.request.Request(embed_url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+        try:
+            with urllib.request.urlopen(req, timeout=12) as r:
+                html = r.read().decode("utf-8", errors="ignore")
+                m = re.findall(r"<script id=\"__NEXT_DATA__\" type=\"application/json\">(.*?)</script>", html)
+                if m:
+                    d = json.loads(m[0])
+                    tracks = d.get("props", {}).get("pageProps", {}).get("state", {}).get("data", {}).get("entity", {}).get("trackList", [])
+                    if tracks:
+                        song_items = []
+                        for t in tracks:
+                            title = t.get("title", "").strip()
+                            artists = ", ".join([a.get("name", "").strip() for a in t.get("artists", []) if a.get("name")])
+                            if title:
+                                song_items.append(f"- {title} (Artists: {artists})")
+                        extra_context += f"\n\n[EXTRACTED SPOTIFY PLAYLIST TRACKS ({len(song_items)} songs)]:\n" + "\n".join(song_items)
+                        print(f"✅ Extracted {len(song_items)} songs from Spotify playlist {playlist_id}", flush=True)
+        except Exception as e:
+            print(f"⚠️ Failed to fetch Spotify playlist: {e}", flush=True)
+
+    return task_text + extra_context
+
+def call_gemini(prompt, system_instruction, model_name="gemini-3.6-flash"):
+    mapped_target = MODEL_ALIASES.get(model_name, model_name)
+    active_fallbacks = [
+        "gemini-3.6-flash",
+        "gemini-3.7-flash",
+        "gemini-3.5-flash-lite",
+        "gemini-flash-lite-latest",
+        "gemini-3.8-flash",
+    ]
+    models_to_try = [mapped_target] + [m for m in active_fallbacks if m != mapped_target]
     last_err = None
 
     for m in models_to_try:
@@ -146,7 +186,14 @@ def call_gemini(prompt, system_instruction, model_name="gemini-3.8-flash"):
         try:
             with urllib.request.urlopen(req, timeout=120) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
-                text_response = data["candidates"][0]["content"]["parts"][0]["text"]
+                text_response = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+                if text_response.startswith("```json"):
+                    text_response = text_response[7:]
+                if text_response.startswith("```"):
+                    text_response = text_response[3:]
+                if text_response.endswith("```"):
+                    text_response = text_response[:-3]
+                text_response = text_response.strip()
                 return json.loads(text_response), m
         except Exception as e:
             print(f"Error calling {m}: {e}", flush=True)
@@ -180,7 +227,7 @@ def call_anthropic(prompt, system_instruction, model_name="claude-3-7-sonnet-202
             text = text[:-3]
         return json.loads(text.strip()), model_name
 
-def call_ai(prompt, system_instruction, model_name="gemini-3.8-flash"):
+def call_ai(prompt, system_instruction, model_name="gemini-3.6-flash"):
     """Unified AI caller supporting Gemini and Claude models."""
     if model_name in ["claude-sonnet-4-6", "claude-opus-4-6"]:
         if ANTHROPIC_API_KEY:
@@ -188,13 +235,13 @@ def call_ai(prompt, system_instruction, model_name="gemini-3.8-flash"):
             try:
                 return call_anthropic(prompt, system_instruction, target_claude)
             except Exception as e:
-                print(f"Anthropic API error: {e}, falling back to Gemini Pro...", flush=True)
+                print(f"Anthropic API error: {e}, falling back to Gemini...", flush=True)
 
         persona = (
             f"You are {model_name}, an elite software engineer. "
             "Think deeply and generate clean, bug-free production-grade modifications. "
         )
-        return call_gemini(prompt, persona + system_instruction, "gemini-2.5-pro")
+        return call_gemini(prompt, persona + system_instruction, "gemini-3.6-flash")
 
     return call_gemini(prompt, system_instruction, model_name)
 
@@ -228,7 +275,7 @@ class StudioRepoSelect(discord.ui.Select):
             color=discord.Color.blue()
         )
         embed.set_footer(text="Step 2 of 3: Select an AI Model from the menu below")
-        view = StudioModelView(session.get("active_model", "gemini-3.8-flash"))
+        view = StudioModelView(session.get("active_model", "gemini-3.6-flash"))
         await interaction.response.edit_message(embed=embed, view=view)
 
 class StudioRepoView(discord.ui.View):
@@ -293,7 +340,7 @@ class StudioControlView(discord.ui.View):
             await interaction.response.send_message("❌ This is not your session.", ephemeral=True)
             return
         session = get_session(self.user_id)
-        view = StudioModelView(session.get("active_model", "gemini-3.8-flash"))
+        view = StudioModelView(session.get("active_model", "gemini-3.6-flash"))
         embed = discord.Embed(
             title="🧠 Switch AI Model",
             description="Select which model you want to switch to:",
@@ -306,7 +353,7 @@ class StudioControlView(discord.ui.View):
         if interaction.user.id != self.user_id:
             await interaction.response.send_message("❌ This is not your session.", ephemeral=True)
             return
-        repos = fetch_user_repos()
+        repos = await asyncio.to_thread(fetch_user_repos)
         view = StudioRepoView(repos)
         embed = discord.Embed(
             title="📁 Switch Repository",
@@ -365,22 +412,25 @@ class PushActionView(discord.ui.View):
 
         await interaction.response.send_message("⏳ Committing and pushing to GitHub...", ephemeral=False)
 
-        try:
+        def _do_git_push():
             subprocess.run(["git", "config", "user.name", "Aditya (Discord Commander)"], cwd=work_dir, check=True)
             subprocess.run(["git", "config", "user.email", "connect.aditya002@gmail.com"], cwd=work_dir, check=True)
             subprocess.run(["git", "add", "-A"], cwd=work_dir, check=True)
             commit_msg = f"feat(discord-ai): {summary}\n\nAutomated via Discord Commander"
             subprocess.run(["git", "commit", "-m", commit_msg], cwd=work_dir, check=True)
             push_res = subprocess.run(["git", "push", "origin", branch], cwd=work_dir, capture_output=True, text=True)
-
             if push_res.returncode != 0:
-                await interaction.followup.send(f"❌ **Push failed:**\n```\n{push_res.stderr}\n```")
+                return False, push_res.stderr, None
+            sha_res = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=work_dir, capture_output=True, text=True)
+            return True, None, sha_res.stdout.strip()
+
+        try:
+            ok, err_msg, commit_sha = await asyncio.to_thread(_do_git_push)
+            if not ok:
+                await interaction.followup.send(f"❌ **Push failed:**\n```\n{err_msg}\n```")
                 return
 
-            sha_res = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=work_dir, capture_output=True, text=True)
-            commit_sha = sha_res.stdout.strip()
             commit_url = f"https://github.com/{GH_USERNAME}/{repo}/commit/{commit_sha}"
-
             embed = discord.Embed(
                 title="🚀 Changes Live & Deployed!",
                 description=f"**{summary}**",
@@ -403,7 +453,7 @@ class PushActionView(discord.ui.View):
             await interaction.response.send_message("❌ This is not your session.", ephemeral=True)
             return
         session = get_session(self.user_id)
-        view = StudioModelView(session.get("active_model", "gemini-3.8-flash"))
+        view = StudioModelView(session.get("active_model", "gemini-3.6-flash"))
         embed = discord.Embed(
             title="🧠 Switch AI Model",
             description="Select which model you want to use:",
@@ -547,7 +597,7 @@ async def model_cmd(ctx, model_name: str = None):
         return
 
     # Show interactive dropdown
-    view = StudioModelView(session.get("active_model", "gemini-3.8-flash"))
+    view = StudioModelView(session.get("active_model", "gemini-3.6-flash"))
     embed = discord.Embed(
         title="🧠 Choose AI Reasoning Engine",
         description="Select which model you want to write and fix your code:",
@@ -562,7 +612,7 @@ async def code_cmd(ctx, *, task: str):
     session = get_session(ctx.author.id)
     repo = session.get("active_repo")
     branch = session.get("active_branch", "main")
-    model_name = session.get("active_model", "gemini-3.8-flash")
+    model_name = session.get("active_model", "gemini-3.6-flash")
 
     if not repo:
         await ctx.send(
@@ -584,17 +634,23 @@ async def code_cmd(ctx, *, task: str):
     else:
         clone_url = f"https://github.com/{GH_USERNAME}/{repo}.git"
 
-    subprocess.run(["rm", "-rf", work_dir])
-    res = subprocess.run(["git", "clone", clone_url, work_dir], capture_output=True, text=True)
-    if res.returncode != 0:
-        await status_msg.edit(content=f"❌ Failed to clone `{repo}`:\n```{res.stderr}```")
-        return
+    def _prepare_and_clone():
+        subprocess.run(["rm", "-rf", work_dir])
+        res = subprocess.run(["git", "clone", clone_url, work_dir], capture_output=True, text=True)
+        if res.returncode != 0:
+            return False, res.stderr
+        subprocess.run(["git", "checkout", branch], cwd=work_dir, capture_output=True)
+        return True, None
 
-    subprocess.run(["git", "checkout", branch], cwd=work_dir, capture_output=True)
+    clone_ok, clone_err = await asyncio.to_thread(_prepare_and_clone)
+    if not clone_ok:
+        await status_msg.edit(content=f"❌ Failed to clone `{repo}`:\n```{clone_err}```")
+        return
 
     model_label = ALL_MODELS.get(model_name, model_name)
     await status_msg.edit(content=f"⏳ **Reading project files and consulting `{model_label}`...**")
-    file_map = gather_repo_files(work_dir)
+    file_map = await asyncio.to_thread(gather_repo_files, work_dir)
+    enriched_task = await asyncio.to_thread(enrich_task_with_external_links, task)
     file_list = "\n".join([f"- {p}" for p in file_map.keys()])
 
     system_instruction = (
@@ -612,12 +668,12 @@ async def code_cmd(ctx, *, task: str):
         "}\n"
     )
 
-    user_prompt = f"Repository: {repo}\nTask: {task}\n\nFiles in repo:\n{file_list}\n\nFile Contents:\n"
+    user_prompt = f"Repository: {repo}\nTask: {enriched_task}\n\nFiles in repo:\n{file_list}\n\nFile Contents:\n"
     for p, c in file_map.items():
         user_prompt += f"\n--- FILE: {p} ---\n{c}\n"
 
     try:
-        ai_response, used_model = call_ai(user_prompt, system_instruction, model_name)
+        ai_response, used_model = await asyncio.to_thread(call_ai, user_prompt, system_instruction, model_name)
     except Exception as e:
         await status_msg.edit(content=f"❌ **AI Error:** {e}")
         return
@@ -667,20 +723,24 @@ async def push_cmd(ctx, *, commit_message: str = None):
         return
 
     msg = await ctx.send("⏳ Committing and pushing to GitHub...")
-    subprocess.run(["git", "config", "user.name", "Aditya (Discord Commander)"], cwd=work_dir, check=True)
-    subprocess.run(["git", "config", "user.email", "connect.aditya002@gmail.com"], cwd=work_dir, check=True)
-    subprocess.run(["git", "add", "-A"], cwd=work_dir, check=True)
-    final_message = commit_message or summary
-    commit_msg = f"feat(discord-ai): {final_message}\n\nAutomated via Discord Commander"
-    subprocess.run(["git", "commit", "-m", commit_msg], cwd=work_dir, check=True)
-    push_res = subprocess.run(["git", "push", "origin", branch], cwd=work_dir, capture_output=True, text=True)
 
-    if push_res.returncode != 0:
-        await msg.edit(content=f"❌ **Push failed:**\n```{push_res.stderr}```")
+    def _do_git_push():
+        subprocess.run(["git", "config", "user.name", "Aditya (Discord Commander)"], cwd=work_dir, check=True)
+        subprocess.run(["git", "config", "user.email", "connect.aditya002@gmail.com"], cwd=work_dir, check=True)
+        subprocess.run(["git", "add", "-A"], cwd=work_dir, check=True)
+        final_message = commit_message or summary
+        commit_msg = f"feat(discord-ai): {final_message}\n\nAutomated via Discord Commander"
+        subprocess.run(["git", "commit", "-m", commit_msg], cwd=work_dir, check=True)
+        push_res = subprocess.run(["git", "push", "origin", branch], cwd=work_dir, capture_output=True, text=True)
+        if push_res.returncode != 0:
+            return False, push_res.stderr, None
+        sha_res = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=work_dir, capture_output=True, text=True)
+        return True, None, sha_res.stdout.strip()
+
+    ok, err_msg, commit_sha = await asyncio.to_thread(_do_git_push)
+    if not ok:
+        await msg.edit(content=f"❌ **Push failed:**\n```{err_msg}```")
         return
-
-    sha_res = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=work_dir, capture_output=True, text=True)
-    commit_sha = sha_res.stdout.strip()
     commit_url = f"https://github.com/{GH_USERNAME}/{repo}/commit/{commit_sha}"
 
     embed = discord.Embed(
@@ -748,7 +808,7 @@ async def reset_cmd(ctx):
     user_sessions[ctx.author.id] = {
         "active_repo": None,
         "active_branch": "main",
-        "active_model": "gemini-3.8-flash",
+        "active_model": "gemini-3.6-flash",
         "pending_summary": None,
         "pending_files": [],
         "work_dir": None
