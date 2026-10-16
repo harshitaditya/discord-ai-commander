@@ -1573,8 +1573,21 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
 def run_health_server():
     port = int(os.environ.get("PORT", 10000))
     server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
-    print(f"🌍 24/7 Health server listening on port {port} (Render compatible)", flush=True)
+    log_event(f"🌍 24/7 Health server listening on port {port} (Render compatible)")
     server.serve_forever()
+
+def self_ping_loop():
+    """Fail-safe keep-alive loop: pings public Render URL every 8 minutes to prevent free-tier sleep."""
+    render_url = os.environ.get("RENDER_EXTERNAL_URL") or "https://discord-ai-commander.onrender.com"
+    time.sleep(90)
+    while True:
+        try:
+            req = urllib.request.Request(render_url, headers={"User-Agent": "Render-KeepAlive/1.0"})
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                log_event(f"💓 Keep-alive self-ping: HTTP {resp.status}")
+        except Exception as e:
+            log_event(f"⚠️ Keep-alive self-ping error: {e}")
+        time.sleep(480)
 
 if __name__ == "__main__":
     if not DISCORD_BOT_TOKEN:
@@ -1584,6 +1597,10 @@ if __name__ == "__main__":
     # Start health server in daemon thread for Render 24/7 compatibility
     health_thread = threading.Thread(target=run_health_server, daemon=True)
     health_thread.start()
+
+    # Start self-ping keep-alive loop to prevent Render 15-minute sleep
+    ping_thread = threading.Thread(target=self_ping_loop, daemon=True)
+    ping_thread.start()
 
     while True:
         try:
