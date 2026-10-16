@@ -229,31 +229,11 @@ class PushActionView(discord.ui.View):
         session["pending_files"] = []
         await interaction.response.send_message("🗑️ Changes discarded.", ephemeral=True)
 
-# --- Render Web Service Health Endpoint ---
-from aiohttp import web
-
-async def handle_ping(request):
-    return web.Response(text="Discord AI Commander is Online 24/7!")
-
-async def start_health_server():
-    port = int(os.environ.get("PORT", 10000))
-    app = web.Application()
-    app.router.add_get("/", handle_ping)
-    app.router.add_get("/health", handle_ping)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", port)
-    await site.start()
-    print(f"🌐 Render Health Server listening on port {port}", flush=True)
-
-# --- Bot Commands ---
+# --- Bot Lifecycle Events ---
 @bot.event
 async def on_ready():
-    print(f"🤖 Discord AI Commander is ready as {bot.user}!", flush=True)
-    try:
-        await start_health_server()
-    except Exception as e:
-        print(f"Health server info: {e}", flush=True)
+    print(f"🤖 Discord AI Commander is READY as {bot.user} (ID: {bot.user.id})!", flush=True)
+    print(f"🔗 Connected to {len(bot.guilds)} guilds, authorized username: '{DISCORD_USERNAME}'", flush=True)
 
 @bot.command(name="help")
 async def help_cmd(ctx):
@@ -492,69 +472,79 @@ async def reset_cmd(ctx):
 async def on_message(message):
     if message.author.bot:
         return
-    if not is_authorized(message.author):
-        await message.channel.send(
-            f"🔒 **Access Restricted:** You are currently logged in as **{message.author}** (ID: `{message.author.id}`).\n"
-            f"This bot is currently locked to `{DISCORD_USERNAME}`. Update `DISCORD_USERNAME` or `DISCORD_USER_ID` in your `.env` to authorize yourself."
-        )
-        return
 
-    ctx = await bot.get_context(message)
+    print(f"📩 [{message.author}] (ID: {message.author.id}) in {message.channel}: '{message.content}'", flush=True)
 
-    # If it starts with '!', process as standard command
-    if message.content.startswith("!"):
-        await bot.process_commands(message)
-        return
-
-    content_clean = message.content.strip().lower()
-    raw_content = message.content.strip()
-
-    # Natural shortcuts without '!'
-    if content_clean in ["help", "commands"]:
-        await help_cmd(ctx)
-    elif content_clean in ["repos", "show repos", "list repos", "my repos", "all repos"]:
-        await repos_cmd(ctx)
-    elif content_clean in ["model", "models", "select model", "change model"]:
-        await model_cmd(ctx)
-    elif content_clean in ["status", "info"]:
-        await status_cmd(ctx)
-    elif content_clean.startswith("push") or content_clean.startswith("deploy"):
-        # Handles:
-        # "push this code with comment my message"
-        # "push with comment my message"
-        # "push this code"
-        # "push"
-        custom_comment = None
-        for marker in ["with comment ", "with message ", "comment: ", "message: "]:
-            if marker in content_clean:
-                idx = content_clean.find(marker) + len(marker)
-                custom_comment = raw_content[idx:].strip().strip('"').strip("'")
-                break
-        await push_cmd(ctx, commit_message=custom_comment)
-    elif content_clean in ["reset", "clear"]:
-        await reset_cmd(ctx)
-    elif content_clean.startswith("repo "):
-        parts = raw_content.split()
-        repo_name = parts[1] if len(parts) > 1 else None
-        branch = parts[2] if len(parts) > 2 else "main"
-        await set_repo_cmd(ctx, repo_name=repo_name, branch=branch)
-    elif content_clean.startswith("use repo ") or content_clean.startswith("select repo "):
-        parts = raw_content.split()
-        repo_name = parts[2] if len(parts) > 2 else None
-        branch = parts[3] if len(parts) > 3 else "main"
-        await set_repo_cmd(ctx, repo_name=repo_name, branch=branch)
-    else:
-        # User typed plain English instructions!
-        session = get_session(message.author.id)
-        if session.get("active_repo"):
-            # Repo is active, treat plain message as coding task!
-            await code_cmd(ctx, task=raw_content)
-        else:
-            await ctx.send(
-                "👋 Hello Aditya! What repository would you like to work on?\n"
-                "• Type `repos` to see all your repositories.\n"
-                "• Type `repo <name>` to select one (e.g. `repo Test`)."
+    try:
+        if not is_authorized(message.author):
+            print(f"🚫 Blocked unauthorized user: {message.author}", flush=True)
+            await message.channel.send(
+                f"🔒 **Access Restricted:** You are currently logged in as **{message.author}** (ID: `{message.author.id}`).\n"
+                f"This bot is currently locked to `{DISCORD_USERNAME}`. Update `DISCORD_USERNAME` or `DISCORD_USER_ID` in your `.env` to authorize yourself."
             )
+            return
+
+        ctx = await bot.get_context(message)
+
+        # If it starts with '!', process as standard command
+        if message.content.startswith("!"):
+            await bot.process_commands(message)
+            return
+
+        content_clean = message.content.strip().lower()
+        raw_content = message.content.strip()
+
+        # Natural shortcuts without '!'
+        if content_clean in ["help", "commands"]:
+            await help_cmd(ctx)
+        elif content_clean in ["repos", "show repos", "list repos", "my repos", "all repos"]:
+            await repos_cmd(ctx)
+        elif content_clean in ["model", "models", "select model", "change model"]:
+            await model_cmd(ctx)
+        elif content_clean in ["status", "info"]:
+            await status_cmd(ctx)
+        elif content_clean == "repo":
+            await ctx.send("⚠️ Please specify a repository name! Example: `repo RetroRaag` or `repo Live_crypto_tracker`")
+        elif content_clean.startswith("push") or content_clean.startswith("deploy"):
+            custom_comment = None
+            for marker in ["with comment ", "with message ", "comment: ", "message: "]:
+                if marker in content_clean:
+                    idx = content_clean.find(marker) + len(marker)
+                    custom_comment = raw_content[idx:].strip().strip('"').strip("'")
+                    break
+            await push_cmd(ctx, commit_message=custom_comment)
+        elif content_clean in ["reset", "clear"]:
+            await reset_cmd(ctx)
+        elif content_clean.startswith("repo "):
+            parts = raw_content.split()
+            repo_name = parts[1] if len(parts) > 1 else None
+            branch = parts[2] if len(parts) > 2 else "main"
+            await set_repo_cmd(ctx, repo_name=repo_name, branch=branch)
+        elif content_clean.startswith("use repo ") or content_clean.startswith("select repo "):
+            parts = raw_content.split()
+            repo_name = parts[2] if len(parts) > 2 else None
+            branch = parts[3] if len(parts) > 3 else "main"
+            await set_repo_cmd(ctx, repo_name=repo_name, branch=branch)
+        else:
+            # User typed plain English instructions!
+            session = get_session(message.author.id)
+            if session.get("active_repo"):
+                # Repo is active, treat plain message as coding task!
+                await code_cmd(ctx, task=raw_content)
+            else:
+                await ctx.send(
+                    "👋 Hello Aditya! What repository would you like to work on?\n"
+                    "• Type `repos` to see all your repositories.\n"
+                    "• Type `repo <name>` to select one (e.g. `repo RetroRaag`)."
+                )
+    except Exception as e:
+        print(f"❌ Error handling message: {e}", flush=True)
+        import traceback
+        traceback.print_exc()
+        try:
+            await message.channel.send(f"⚠️ Error processing command: `{e}`")
+        except Exception:
+            pass
 
 # --- Health Check Server for Render 24/7 Hosting ---
 class HealthCheckHandler(BaseHTTPRequestHandler):
@@ -562,11 +552,21 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-type", "application/json")
         self.end_headers()
-        bot_user_str = str(bot.user) if bot.is_ready() else "connecting"
+        is_ready = bot.is_ready()
+        is_closed = bot.is_closed()
+        try:
+            latency = round(bot.latency * 1000, 2)
+        except Exception:
+            latency = None
         payload = {
-            "status": "healthy",
+            "status": "healthy" if (is_ready and not is_closed) else "reconnecting",
             "service": "Discord AI Commander",
-            "bot_user": bot_user_str,
+            "bot_user": str(bot.user) if is_ready else "connecting",
+            "is_ready": is_ready,
+            "is_closed": is_closed,
+            "latency_ms": latency,
+            "authorized_username": DISCORD_USERNAME,
+            "guilds": [g.name for g in bot.guilds],
             "models_available": list(GOOGLE_AI_PRO_MODELS.keys()),
             "message": "Bot is online and ready 24/7!"
         }
@@ -577,18 +577,24 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         pass
 
 def run_health_server():
-    port = int(os.environ.get("PORT", 8080))
+    port = int(os.environ.get("PORT", 10000))
     server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
-    print(f"🌍 24/7 Health server listening on port {port} (Render compatible)")
+    print(f"🌍 24/7 Health server listening on port {port} (Render compatible)", flush=True)
     server.serve_forever()
 
 if __name__ == "__main__":
     if not DISCORD_BOT_TOKEN:
-        print("ERROR: DISCORD_BOT_TOKEN is not set in environment!")
+        print("ERROR: DISCORD_BOT_TOKEN is not set in environment!", flush=True)
         sys.exit(1)
 
     # Start health server in daemon thread for Render 24/7 compatibility
     health_thread = threading.Thread(target=run_health_server, daemon=True)
     health_thread.start()
 
-    bot.run(DISCORD_BOT_TOKEN)
+    import time
+    while True:
+        try:
+            bot.run(DISCORD_BOT_TOKEN)
+        except Exception as e:
+            print(f"⚠️ bot.run exited with: {e}. Reconnecting in 5s...", flush=True)
+            time.sleep(5)
