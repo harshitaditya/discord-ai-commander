@@ -6,6 +6,7 @@ import urllib.request
 import urllib.error
 import threading
 import time
+import asyncio
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from dotenv import load_dotenv
 import discord
@@ -696,6 +697,47 @@ async def push_cmd(ctx, *, commit_message: str = None):
     session["pending_summary"] = None
     session["pending_files"] = []
 
+@bot.command(name="clear")
+async def clear_chat_cmd(ctx):
+    if not is_authorized(ctx.author):
+        return
+    channel = ctx.channel
+    session = get_session(ctx.author.id)
+    if session.get("work_dir") and os.path.exists(session["work_dir"]):
+        subprocess.run(["rm", "-rf", session["work_dir"]])
+    session["active_repo"] = None
+    session["pending_summary"] = None
+    session["pending_files"] = []
+
+    # If in a guild text channel (where bulk purge is allowed)
+    if isinstance(channel, discord.TextChannel):
+        try:
+            deleted = await channel.purge(limit=100)
+            confirm_msg = await channel.send(f"🧹 Cleared {len(deleted)} messages from chat! Type `lets code` to start fresh.")
+            await asyncio.sleep(4)
+            try:
+                await confirm_msg.delete()
+            except Exception:
+                pass
+            return
+        except discord.Forbidden:
+            pass
+
+    # If in a DM channel (Discord forbids deleting other users' messages in DMs, but allows deleting bot's messages)
+    deleted_count = 0
+    try:
+        async for m in channel.history(limit=100):
+            if m.author == bot.user:
+                try:
+                    await m.delete()
+                    deleted_count += 1
+                except Exception:
+                    pass
+    except Exception as e:
+        print(f"Error purging messages in DM: {e}", flush=True)
+
+    await channel.send(f"🧹 Chat cleared ({deleted_count} bot messages removed) & session reset!\n👉 Type **`lets code`** to start fresh.")
+
 @bot.command(name="reset")
 async def reset_cmd(ctx):
     if not is_authorized(ctx.author):
@@ -740,8 +782,13 @@ async def on_message(message):
         raw_content = message.content.strip()
         content_lower = raw_content.lower()
 
-        # 1. Close Chat / Stop / Exit (Works in ANY case: CLOSE, Close Chat, EXIT, QUIT, STOP)
-        if content_lower in ["close", "close chat", "exit", "quit", "stop", "end chat", "bye", "reset", "clear", "cancel"]:
+        # 1. Clear Chat (Works in ANY case: CLEAR, Clear, clear chat, CLEAR CHAT, cls, CLS, clean)
+        if content_lower in ["clear", "clear chat", "clearchat", "cls", "clean", "clean chat"]:
+            await clear_chat_cmd(ctx)
+            return
+
+        # 2. Close Chat / Stop / Exit (Works in ANY case: CLOSE, Close Chat, EXIT, QUIT, STOP)
+        if content_lower in ["close", "close chat", "exit", "quit", "stop", "end chat", "bye", "cancel"]:
             await reset_cmd(ctx)
             return
 
