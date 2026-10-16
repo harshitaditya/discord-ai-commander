@@ -1427,8 +1427,10 @@ async def on_message(message):
             await start_studio_flow(message.channel, message.author.id)
             return
 
-        # 6. "lets code" studio trigger (Works in ANY case: LETS CODE, Lets Code, let's code, lets ccode, etc.)
-        if content_lower in ["lets code", "let's code", "lets_code", "lets ccode", "let's ccode", "letscode", "let code", "start coding", "start code", "code", "start"]:
+        # 6. "lets code" studio trigger (Works in ANY case & handles mobile keyboard typos like 3 for e)
+        cleaned_trigger = content_lower.replace("'", "").replace("3", "e").replace(" ", "").replace("_", "")
+        if (content_lower in ["lets code", "let's code", "lets_code", "lets ccode", "let's ccode", "letscode", "let code", "start coding", "start code", "code", "start", "let's cod3", "lets cod3"] or
+            cleaned_trigger in ["letscode", "letsccode", "letcode", "startcoding", "startcode", "code", "start", "studio"]):
             await start_studio_flow(message.channel, message.author.id)
             return
 
