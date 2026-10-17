@@ -36,11 +36,12 @@ DISCORD_USERNAME = os.environ.get("DISCORD_USERNAME", "aditya_ak02")
 
 # All supported Heavy AI Models (Antigravity Agent Engines)
 ALL_MODELS = {
-    "gemini-3.6-flash": "⚡ Gemini 3.6 Flash (Antigravity Heavy Agent Engine) [DEFAULT]",
-    "gemini-3.1-pro": "🧠 Gemini 3.1 Pro (Deep Logic & Complex Architecture - Heavy Coding)",
-    "gemini-4-argon": "🔮 Gemini 4 Argon (Next-Gen Autonomous Heavy Coding)",
-    "claude-sonnet-4-6": "🎭 Claude Sonnet 4.6 (Elite Refactoring & Architecture)",
-    "claude-opus-4-6": "👑 Claude Opus 4.6 (Maximum Reasoning & Heavy Coding)",
+    "gemini-3-flash-preview": "⚡ Gemini 3 Flash (High Quota & Heavy Agent Engine) [DEFAULT]",
+    "gemini-3.6-flash": "⚡ Gemini 3.6 Flash (Antigravity Agent Engine)",
+    "gemini-3.5-flash-lite": "🚀 Gemini 3.5 Flash Lite (Ultra Fast & 0% Throttling)",
+    "gemini-3.1-pro": "🧠 Gemini 3.1 Pro (Deep Logic & Complex Architecture)",
+    "claude-opus-4-6": "👑 Claude Opus 4.6 (Deep Reasoning Engine)",
+    "claude-sonnet-4-6": "🎭 Claude Sonnet 4.6 (Elite Refactoring Engine)",
 }
 
 intents = discord.Intents.default()
@@ -55,7 +56,7 @@ def get_session(user_id):
         user_sessions[user_id] = {
             "active_repo": None,
             "active_branch": "main",
-            "active_model": "gemini-3.6-flash",
+            "active_model": "gemini-3-flash-preview",
             "pending_summary": None,
             "pending_files": [],
             "work_dir": None,
@@ -63,7 +64,7 @@ def get_session(user_id):
             "last_suggested_task": None
         }
     if user_sessions[user_id].get("active_model") not in ALL_MODELS:
-        user_sessions[user_id]["active_model"] = "gemini-3.6-flash"
+        user_sessions[user_id]["active_model"] = "gemini-3-flash-preview"
     if "chat_history" not in user_sessions[user_id]:
         user_sessions[user_id]["chat_history"] = []
     if "last_suggested_task" not in user_sessions[user_id]:
@@ -383,8 +384,9 @@ def run_project_verification(work_dir):
 
 MODEL_ALIASES = {
     "gemini-3.1-pro": "gemini-3.1-pro-preview",
-    "claude-opus-4-6": "gemini-3.6-flash",
-    "claude-sonnet-4-6": "gemini-3.6-flash",
+    "gemini-4-argon": "gemini-3-flash-preview",
+    "claude-opus-4-6": "gemini-3-flash-preview",
+    "claude-sonnet-4-6": "gemini-3-flash-preview",
 }
 
 def enrich_task_with_external_links(task_text):
@@ -417,14 +419,15 @@ def enrich_task_with_external_links(task_text):
 
     return task_text + extra_context
 
-def call_gemini(prompt, system_instruction, model_name="gemini-3.6-flash"):
+def call_gemini(prompt, system_instruction, model_name="gemini-3-flash-preview"):
     mapped_target = MODEL_ALIASES.get(model_name, model_name)
     active_fallbacks = [
+        "gemini-3-flash-preview",
+        "gemini-3.5-flash-lite",
+        "gemini-flash-lite-latest",
+        "gemini-3.1-flash-lite-preview",
+        "gemini-3.8-flash",
         "gemini-3.6-flash",
-        "gemini-3.1-pro-preview",
-        "gemini-4-argon",
-        "gemini-2.5-pro",
-        "gemini-2.5-flash",
     ]
     models_to_try = [mapped_target] + [m for m in active_fallbacks if m != mapped_target]
     last_err = None
@@ -438,7 +441,7 @@ def call_gemini(prompt, system_instruction, model_name="gemini-3.6-flash"):
         }
         req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers={"Content-Type": "application/json"})
         try:
-            with urllib.request.urlopen(req, timeout=60) as resp:
+            with urllib.request.urlopen(req, timeout=45) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
                 text_response = data["candidates"][0]["content"]["parts"][0]["text"].strip()
                 if text_response.startswith("```json"):
@@ -450,9 +453,9 @@ def call_gemini(prompt, system_instruction, model_name="gemini-3.6-flash"):
                 text_response = text_response.strip()
                 return json.loads(text_response), m
         except Exception as e:
-            print(f"Error calling {m}: {e}", flush=True)
+            print(f"Error calling {m}: {e}, trying next fallback...", flush=True)
             last_err = e
-            time.sleep(1)
+            time.sleep(0.2)
 
     raise RuntimeError(f"Gemini API error. Last error: {last_err}")
 
@@ -482,7 +485,7 @@ def call_anthropic(prompt, system_instruction, model_name="claude-3-7-sonnet-202
             text = text[:-3]
         return json.loads(text.strip()), model_name
 
-def call_ai(prompt, system_instruction, model_name="gemini-3.6-flash"):
+def call_ai(prompt, system_instruction, model_name="gemini-3-flash-preview"):
     """Unified AI caller supporting Gemini and Claude models."""
     if model_name in ["claude-sonnet-4-6", "claude-opus-4-6"]:
         if ANTHROPIC_API_KEY:
@@ -496,18 +499,19 @@ def call_ai(prompt, system_instruction, model_name="gemini-3.6-flash"):
             f"You are {model_name}, an elite software engineer. "
             "Think deeply and generate clean, bug-free production-grade modifications. "
         )
-        return call_gemini(prompt, persona + system_instruction, "gemini-3.6-flash")
+        return call_gemini(prompt, persona + system_instruction, "gemini-3-flash-preview")
 
     return call_gemini(prompt, system_instruction, model_name)
 
-def call_gemini_text(prompt, system_instruction, model_name="gemini-3.6-flash", chat_history=None):
+def call_gemini_text(prompt, system_instruction, model_name="gemini-3-flash-preview", chat_history=None):
     mapped_target = MODEL_ALIASES.get(model_name, model_name)
     active_fallbacks = [
+        "gemini-3-flash-preview",
+        "gemini-3.5-flash-lite",
+        "gemini-flash-lite-latest",
+        "gemini-3.1-flash-lite-preview",
+        "gemini-3.8-flash",
         "gemini-3.6-flash",
-        "gemini-3.1-pro-preview",
-        "gemini-4-argon",
-        "gemini-2.5-pro",
-        "gemini-2.5-flash",
     ]
     models_to_try = [mapped_target] + [m for m in active_fallbacks if m != mapped_target]
     last_err = None
