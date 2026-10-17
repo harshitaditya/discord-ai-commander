@@ -1387,7 +1387,7 @@ async def run_antigravity_cloud_agent(ctx, status_msg, session, repo, branch, ta
 
     history_log = []
     modified_files = set()
-    max_turns = 8
+    max_turns = 10
     turn = 0
     verification_passed = False
     task_summary = f"Completed: {task[:80]}"
@@ -1414,7 +1414,7 @@ async def run_antigravity_cloud_agent(ctx, status_msg, session, repo, branch, ta
         "- NEVER call 'finish_task' on Turn 1 or before modifying files! You must actively inspect and edit code.\n"
         "- NEVER just describe what to build in 'thought' and call finish_task. You MUST call grep_search/view_file and then replace_snippet/write_file to implement it!\n"
         "- STEP 1 (Inspect): Always use grep_search or view_file first to see the exact code. NEVER guess line content!\n"
-        "- STEP 2 (Edit): Use replace_snippet with exact lines to implement the user's requested changes.\n"
+        "- STEP 2 (Edit): Once you locate the code, immediately call replace_snippet with exact lines to implement the user's requested changes. Do NOT spend excessive turns just reading!\n"
         "- STEP 3 (Verify): Call run_verification(). If it fails, read the error and fix it.\n"
         "- STEP 4 (Finish): Call finish_task() ONLY after code has been edited and verified.\n\n"
         "RESPONSE SCHEMA:\n"
@@ -1608,13 +1608,20 @@ async def run_antigravity_cloud_agent(ctx, status_msg, session, repo, branch, ta
             session["chat_history"] = session["chat_history"][-8:]
 
         embed = discord.Embed(
-            title="ℹ️ Antigravity Cloud Agent Completed",
-            description=f"### {last_thought}\n\nAgent analyzed repository and concluded no code modifications were necessary.",
+            title="ℹ️ Antigravity Cloud Agent Inspection Completed",
+            description=(
+                f"**Agent Observation:**\n> *{last_thought}*\n\n"
+                f"🔍 **Status:** {task_summary}\n\n"
+                "ℹ️ **No code was modified in this turn:**\n"
+                "• The agent inspected the repository files based on your prompt.\n"
+                "• To make actual code changes, provide a specific instruction (e.g., *'dropdown ko upward open karo'* or *'Side A font color badlo'*).\n"
+                "• You can also switch models or repos using the buttons below."
+            ),
             color=discord.Color.blue()
         )
         embed.add_field(name="Project", value=f"`{repo}` (`{branch}`)", inline=True)
         embed.add_field(name="Model", value=f"`{used_model}`", inline=True)
-        await status_msg.edit(content=None, embed=embed)
+        await status_msg.edit(content=None, embed=embed, view=StudioControlView(ctx.author.id))
         return
 
     # Generate diff snippet
