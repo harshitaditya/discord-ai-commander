@@ -946,6 +946,36 @@ class PushActionView(discord.ui.View):
         session["pending_files"] = []
         await interaction.response.send_message("🗑️ Changes discarded & session closed. Type `lets code` to start fresh.", ephemeral=False)
 
+class RetryFailedStepView(discord.ui.View):
+    def __init__(self, user_id, failed_step):
+        super().__init__(timeout=600)
+        self.user_id = user_id
+        self.failed_step = failed_step
+
+    @discord.ui.button(label="🔄 Retry from this Step", style=discord.ButtonStyle.green, row=0)
+    async def retry_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("❌ This is not your session.", ephemeral=True)
+            return
+        session = get_session(self.user_id)
+        cp = session.get("checkpoint", {})
+        task = cp.get("task", "")
+        if not task:
+            await interaction.response.send_message("⚠️ No paused checkpoint found.", ephemeral=True)
+            return
+        await interaction.response.send_message(f"🔄 Resuming execution from **Step {self.failed_step} of 5** (skipping earlier completed steps)...", ephemeral=False)
+        ctx = await bot.get_context(interaction.message)
+        await code_cmd(ctx, task=task, resume_step=self.failed_step)
+
+    @discord.ui.button(label="❌ Reset / Start Fresh", style=discord.ButtonStyle.secondary, row=0)
+    async def cancel_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("❌ This is not your session.", ephemeral=True)
+            return
+        session = get_session(self.user_id)
+        session["checkpoint"] = {}
+        await interaction.response.send_message("🧹 Checkpoint cleared. Type `lets code` to start fresh.", ephemeral=True)
+
 class ApplyTaskModal(discord.ui.Modal, title="🚀 Execute Agentic Fix"):
     task_input = discord.ui.TextInput(
         label="What should the AI fix/build?",
@@ -1184,7 +1214,7 @@ async def model_cmd(ctx, model_name: str = None):
     await ctx.send(embed=embed, view=view)
 
 @bot.command(name="code")
-async def code_cmd(ctx, *, task: str):
+async def code_cmd(ctx, *, task: str, resume_step: int = 1):
     if not is_authorized(ctx.author):
         return
     session = get_session(ctx.author.id)
@@ -1211,289 +1241,390 @@ async def code_cmd(ctx, *, task: str):
     else:
         clone_url = f"https://github.com/{GH_USERNAME}/{repo}.git"
 
+    # Load existing checkpoint if resuming
+    cp = session.get("checkpoint", {})
+    clone_duration = cp.get("clone_duration", 5.0)
+    gather_duration = cp.get("gather_duration", 1.0)
+    ai_duration = cp.get("ai_duration", 15.0)
+    spotify_note = cp.get("spotify_note", "")
+    enriched_task = cp.get("enriched_task", task)
+    file_map = cp.get("file_map", {})
+    all_repo_paths = cp.get("all_repo_paths", [])
+    changed_files = cp.get("changed_files", [])
+    summary = cp.get("summary", "Code updated via Discord Commander")
+    used_model = cp.get("used_model", model_name)
+    step_history = cp.get("step_history", []) if resume_step > 1 else []
+    status_msg = None
+
     # Step 1: Initialize & Clone
-    step_history = ["🔄 Step 1: Initializing git workspace & checking credentials..."]
-    progress_embed = create_agent_progress_embed(
-        repo=repo,
-        model_label=model_label,
-        task=task,
-        step_num=1,
-        step_title="Cloning & Setting Up Workspace",
-        percent=15,
-        steps_history=step_history,
-        current_thought=f"Setting up clean isolated local workspace for {repo} ({branch})..."
-    )
-    status_msg = await ctx.send(embed=progress_embed)
+    if resume_step <= 1:
+        try:
+            step_history = ["🔄 Step 1: Initializing git workspace & checking credentials..."]
+            progress_embed = create_agent_progress_embed(
+                repo=repo,
+                model_label=model_label,
+                task=task,
+                step_num=1,
+                step_title="Cloning & Setting Up Workspace",
+                percent=15,
+                steps_history=step_history,
+                current_thought=f"Setting up clean isolated local workspace for {repo} ({branch})..."
+            )
+            status_msg = await ctx.send(embed=progress_embed)
 
-    def _prepare_and_clone():
-        subprocess.run(["rm", "-rf", work_dir])
-        res = subprocess.run(["git", "clone", clone_url, work_dir], capture_output=True, text=True)
-        if res.returncode != 0:
-            return False, res.stderr
-        subprocess.run(["git", "checkout", branch], cwd=work_dir, capture_output=True)
-        return True, None
+            def _prepare_and_clone():
+                subprocess.run(["rm", "-rf", work_dir])
+                res = subprocess.run(["git", "clone", clone_url, work_dir], capture_output=True, text=True)
+                if res.returncode != 0:
+                    return False, res.stderr
+                subprocess.run(["git", "checkout", branch], cwd=work_dir, capture_output=True)
+                return True, None
 
-    start_clone = time.time()
-    clone_ok, clone_err = await asyncio.to_thread(_prepare_and_clone)
-    clone_duration = time.time() - start_clone
+            start_clone = time.time()
+            clone_ok, clone_err = await asyncio.to_thread(_prepare_and_clone)
+            clone_duration = time.time() - start_clone
 
-    if not clone_ok:
-        await status_msg.edit(content=f"❌ Failed to clone `{repo}`:\n```{clone_err}```", embed=None)
-        return
+            if not clone_ok:
+                session["checkpoint"] = {"failed_step": 1, "task": task, "err_msg": clone_err}
+                view = RetryFailedStepView(ctx.author.id, 1)
+                await status_msg.edit(content=f"❌ Failed to clone `{repo}`:\n```{clone_err}```", embed=None, view=view)
+                return
+        except Exception as e:
+            session["checkpoint"] = {"failed_step": 1, "task": task, "err_msg": str(e)}
+            view = RetryFailedStepView(ctx.author.id, 1)
+            err_emb = discord.Embed(title="⚠️ Paused at Step 1 of 5 (Cloning)", description=f"`{e}`", color=discord.Color.gold())
+            if status_msg:
+                await status_msg.edit(content=None, embed=err_emb, view=view)
+            else:
+                await ctx.send(embed=err_emb, view=view)
+            return
 
     # Step 2: Indexing Files & Extracting External Context
-    step_history = [
-        f"✅ Step 1: Cloned `{repo}` (`{branch}`) in {clone_duration:.1f}s",
-        "🔄 Step 2: Indexing source files & extracting external playlist/doc references..."
-    ]
-    progress_embed = create_agent_progress_embed(
-        repo=repo,
-        model_label=model_label,
-        task=task,
-        step_num=2,
-        step_title="Indexing Files & Resolving Links",
-        percent=35,
-        steps_history=step_history,
-        current_thought="Checking for Spotify playlists, documentation URLs, and scanning code..."
-    )
-    await status_msg.edit(embed=progress_embed)
+    if resume_step <= 2:
+        try:
+            step_history = [
+                f"✅ Step 1: Cloned `{repo}` (`{branch}`) in {clone_duration:.1f}s",
+                "🔄 Step 2: Indexing source files & extracting external playlist/doc references..."
+            ]
+            progress_embed = create_agent_progress_embed(
+                repo=repo,
+                model_label=model_label,
+                task=task,
+                step_num=2,
+                step_title="Indexing Files & Resolving Links",
+                percent=35,
+                steps_history=step_history,
+                current_thought="Checking for Spotify playlists, documentation URLs, and scanning code..."
+            )
+            if status_msg:
+                await status_msg.edit(embed=progress_embed)
+            else:
+                status_msg = await ctx.send(embed=progress_embed)
 
-    start_gather = time.time()
-    enriched_task = await asyncio.to_thread(enrich_task_with_external_links, task)
-    file_map, all_repo_paths = await asyncio.to_thread(gather_repo_files, work_dir, task)
-    gather_duration = time.time() - start_gather
+            start_gather = time.time()
+            enriched_task = await asyncio.to_thread(enrich_task_with_external_links, task)
+            file_map, all_repo_paths = await asyncio.to_thread(gather_repo_files, work_dir, task)
+            gather_duration = time.time() - start_gather
 
-    spotify_note = ""
-    if "[EXTRACTED SPOTIFY PLAYLIST TRACKS" in enriched_task:
-        cnt = len(re.findall(r"^- ", enriched_task, re.MULTILINE))
-        spotify_note = f" (Extracted {cnt} Spotify tracks)"
-
-    file_list = "\n".join([f"- {p}" for p in all_repo_paths])
+            if "[EXTRACTED SPOTIFY PLAYLIST TRACKS" in enriched_task:
+                cnt = len(re.findall(r"^- ", enriched_task, re.MULTILINE))
+                spotify_note = f" (Extracted {cnt} Spotify tracks)"
+            else:
+                spotify_note = ""
+        except Exception as e:
+            session["checkpoint"] = {"failed_step": 2, "task": task, "clone_duration": clone_duration, "err_msg": str(e)}
+            view = RetryFailedStepView(ctx.author.id, 2)
+            err_emb = discord.Embed(title="⚠️ Paused at Step 2 of 5 (Indexing)", description=f"`{e}`", color=discord.Color.gold())
+            if status_msg:
+                await status_msg.edit(content=None, embed=err_emb, view=view)
+            else:
+                await ctx.send(embed=err_emb, view=view)
+            return
 
     # Step 3: Neural Reasoning & Code Generation
-    step_history = [
-        f"✅ Step 1: Cloned `{repo}` (`{branch}`) in {clone_duration:.1f}s",
-        f"✅ Step 2: Indexed {len(file_map)} priority files{spotify_note} in {gather_duration:.1f}s",
-        f"🔄 Step 3: Neural reasoning & synthesizing patch with {model_label}..."
-    ]
-    progress_embed = create_agent_progress_embed(
-        repo=repo,
-        model_label=model_label,
-        task=task,
-        step_num=3,
-        step_title="Agentic Reasoning & Patch Synthesis",
-        percent=65,
-        steps_history=step_history,
-        current_thought=f"Analyzing codebase and generating precision patch with {model_name}..."
-    )
-    await status_msg.edit(embed=progress_embed)
+    if resume_step <= 3:
+        try:
+            file_list = "\n".join([f"- {p}" for p in all_repo_paths])
+            step_history = [
+                f"✅ Step 1: Cloned `{repo}` (`{branch}`) in {clone_duration:.1f}s",
+                f"✅ Step 2: Indexed {len(file_map)} priority files{spotify_note} in {gather_duration:.1f}s",
+                f"🔄 Step 3: Neural reasoning & synthesizing patch with {model_label}..."
+            ]
+            progress_embed = create_agent_progress_embed(
+                repo=repo,
+                model_label=model_label,
+                task=task,
+                step_num=3,
+                step_title="Agentic Reasoning & Patch Synthesis",
+                percent=65,
+                steps_history=step_history,
+                current_thought=f"Analyzing codebase and generating precision patch with {model_name}..."
+            )
+            if status_msg:
+                await status_msg.edit(embed=progress_embed)
+            else:
+                status_msg = await ctx.send(embed=progress_embed)
 
-    system_instruction = (
-        "You are an expert autonomous software engineer operating inside an Antigravity Agent Engine. "
-        "Analyze the project carefully and generate precision patches to fulfill the task with zero regressions.\n\n"
-        "CRITICAL RULES FOR PRESERVING CODE:\n"
-        "1. For EXISTING files, NEVER return the entire file content! Always use action='patch' with targeted 'target' and 'replacement' blocks.\n"
-        "   - 'target': The exact existing code block (including surrounding 1-2 lines for context) to find and replace.\n"
-        "   - 'replacement': The new code block that replaces it.\n"
-        "2. For NEW files only, use action='create' and provide 'content'.\n"
-        "3. For adding code to the end of a file (like CSS), use action='append' and provide 'content'.\n"
-        "4. Ensure JavaScript, JSX, CSS, and Python syntax is 100% complete and valid.\n\n"
-        "Return ONLY a JSON object in this exact schema:\n"
-        "{\n"
-        '  "summary": "Brief 1-2 sentence description of what was changed",\n'
-        '  "files": [\n'
-        '    {\n'
-        '      "path": "relative/path/to/file.ext",\n'
-        '      "action": "patch",\n'
-        '      "patches": [\n'
-        '        {\n'
-        '          "target": "<exact snippet of existing code to replace>",\n'
-        '          "replacement": "<new replacement code>"\n'
-        '        }\n'
-        '      ]\n'
-        '    }\n'
-        '  ]\n'
-        "}\n"
-    )
+            system_instruction = (
+                "You are an expert autonomous software engineer operating inside an Antigravity Agent Engine. "
+                "Analyze the project carefully and generate precision patches to fulfill the task with zero regressions.\n\n"
+                "CRITICAL RULES FOR PRESERVING CODE:\n"
+                "1. For EXISTING files, NEVER return the entire file content! Always use action='patch' with targeted 'target' and 'replacement' blocks.\n"
+                "   - 'target': The exact existing code block (including surrounding 1-2 lines for context) to find and replace.\n"
+                "   - 'replacement': The new code block that replaces it.\n"
+                "2. For NEW files only, use action='create' and provide 'content'.\n"
+                "3. For adding code to the end of a file (like CSS), use action='append' and provide 'content'.\n"
+                "4. Ensure JavaScript, JSX, CSS, and Python syntax is 100% complete and valid.\n\n"
+                "Return ONLY a JSON object in this exact schema:\n"
+                "{\n"
+                '  "summary": "Brief 1-2 sentence description of what was changed",\n'
+                '  "files": [\n'
+                '    {\n'
+                '      "path": "relative/path/to/file.ext",\n'
+                '      "action": "patch",\n'
+                '      "patches": [\n'
+                '        {\n'
+                '          "target": "<exact snippet of existing code to replace>",\n'
+                '          "replacement": "<new replacement code>"\n'
+                '        }\n'
+                '      ]\n'
+                '    }\n'
+                '  ]\n'
+                "}\n"
+            )
 
-    user_prompt = f"Repository: {repo}\nTask: {enriched_task}\n\nFiles in repo:\n{file_list}\n\nFile Contents:\n"
-    for p, c in file_map.items():
-        user_prompt += f"\n--- FILE: {p} ---\n{c}\n"
+            user_prompt = f"Repository: {repo}\nTask: {enriched_task}\n\nFiles in repo:\n{file_list}\n\nFile Contents:\n"
+            for p, c in file_map.items():
+                user_prompt += f"\n--- FILE: {p} ---\n{c}\n"
 
-    start_ai = time.time()
-    try:
-        ai_response, used_model = await asyncio.to_thread(call_ai, user_prompt, system_instruction, model_name)
-    except Exception as e:
-        await status_msg.edit(content=f"❌ **AI Error:** {e}", embed=None)
-        return
-    ai_duration = time.time() - start_ai
+            start_ai = time.time()
+            ai_response, used_model = await asyncio.to_thread(call_ai, user_prompt, system_instruction, model_name)
+            ai_duration = time.time() - start_ai
 
-    summary = ai_response.get("summary", "Code updated via Discord Commander")
-    changed_files = ai_response.get("files", [])
+            summary = ai_response.get("summary", "Code updated via Discord Commander")
+            changed_files = ai_response.get("files", [])
 
-    if not changed_files:
-        await status_msg.edit(content=f"⚠️ AI did not suggest any changes.\n**Note:** {summary}", embed=None)
-        return
+            if not changed_files:
+                session["checkpoint"] = {"failed_step": 3, "task": task, "err_msg": "AI suggested no changes"}
+                view = RetryFailedStepView(ctx.author.id, 3)
+                await status_msg.edit(content=f"⚠️ AI did not suggest any changes.\n**Note:** {summary}", embed=None, view=view)
+                return
+        except Exception as e:
+            session["checkpoint"] = {
+                "failed_step": 3, "task": task, "clone_duration": clone_duration,
+                "gather_duration": gather_duration, "file_map": file_map, "all_repo_paths": all_repo_paths,
+                "err_msg": str(e)
+            }
+            view = RetryFailedStepView(ctx.author.id, 3)
+            err_emb = discord.Embed(title="⚠️ Paused at Step 3 of 5 (AI Synthesis)", description=f"`{e}`", color=discord.Color.gold())
+            if status_msg:
+                await status_msg.edit(content=None, embed=err_emb, view=view)
+            else:
+                await ctx.send(embed=err_emb, view=view)
+            return
 
     # Step 4: Applying Patches to Disk
-    step_history = [
-        f"✅ Step 1: Cloned `{repo}` (`{branch}`) in {clone_duration:.1f}s",
-        f"✅ Step 2: Indexed {len(file_map)} files{spotify_note}",
-        f"✅ Step 3: {used_model} synthesized precision patch in {ai_duration:.1f}s",
-        f"🔄 Step 4: Applying {len(changed_files)} precision patch(es) to workspace..."
-    ]
-    progress_embed = create_agent_progress_embed(
-        repo=repo,
-        model_label=model_label,
-        task=task,
-        step_num=4,
-        step_title="Applying Precision Patches",
-        percent=70,
-        steps_history=step_history,
-        current_thought="Applying targeted non-destructive patches to codebase..."
-    )
-    await status_msg.edit(embed=progress_embed)
+    if resume_step <= 4:
+        try:
+            step_history = [
+                f"✅ Step 1: Cloned `{repo}` (`{branch}`) in {clone_duration:.1f}s",
+                f"✅ Step 2: Indexed {len(file_map)} files{spotify_note}",
+                f"✅ Step 3: {used_model} synthesized precision patch in {ai_duration:.1f}s",
+                f"🔄 Step 4: Applying {len(changed_files)} precision patch(es) to workspace..."
+            ]
+            progress_embed = create_agent_progress_embed(
+                repo=repo,
+                model_label=model_label,
+                task=task,
+                step_num=4,
+                step_title="Applying Precision Patches",
+                percent=70,
+                steps_history=step_history,
+                current_thought="Applying targeted non-destructive patches to codebase..."
+            )
+            if status_msg:
+                await status_msg.edit(embed=progress_embed)
+            else:
+                status_msg = await ctx.send(embed=progress_embed)
 
-    patch_errors = []
-    for item in changed_files:
-        rel_p = item.get("path")
-        target_path = os.path.join(work_dir, rel_p)
-        action = item.get("action", "patch" if "patches" in item else "write")
+            patch_errors = []
+            for item in changed_files:
+                rel_p = item.get("path")
+                target_path = os.path.join(work_dir, rel_p)
+                action = item.get("action", "patch" if "patches" in item else "write")
 
-        if action == "append":
-            os.makedirs(os.path.dirname(target_path), exist_ok=True)
-            with open(target_path, "a", encoding="utf-8") as fp:
-                fp.write("\n" + item.get("content", ""))
-        elif action == "create" or not os.path.exists(target_path):
-            os.makedirs(os.path.dirname(target_path), exist_ok=True)
-            with open(target_path, "w", encoding="utf-8") as fp:
-                fp.write(item.get("content", ""))
-        elif "patches" in item and item["patches"]:
-            for patch in item["patches"]:
-                t_code = patch.get("target", "")
-                r_code = patch.get("replacement", "")
-                ok, err = apply_precision_patch(target_path, t_code, r_code)
-                if not ok:
-                    patch_errors.append(f"{rel_p}: {err}")
-        elif "content" in item and item["content"]:
-            os.makedirs(os.path.dirname(target_path), exist_ok=True)
-            with open(target_path, "w", encoding="utf-8") as fp:
-                fp.write(item["content"])
+                if action == "append":
+                    os.makedirs(os.path.dirname(target_path), exist_ok=True)
+                    with open(target_path, "a", encoding="utf-8") as fp:
+                        fp.write("\n" + item.get("content", ""))
+                elif action == "create" or not os.path.exists(target_path):
+                    os.makedirs(os.path.dirname(target_path), exist_ok=True)
+                    with open(target_path, "w", encoding="utf-8") as fp:
+                        fp.write(item.get("content", ""))
+                elif "patches" in item and item["patches"]:
+                    for patch in item["patches"]:
+                        t_code = patch.get("target", "")
+                        r_code = patch.get("replacement", "")
+                        ok, err = apply_precision_patch(target_path, t_code, r_code)
+                        if not ok:
+                            patch_errors.append(f"{rel_p}: {err}")
+                elif "content" in item and item["content"]:
+                    os.makedirs(os.path.dirname(target_path), exist_ok=True)
+                    with open(target_path, "w", encoding="utf-8") as fp:
+                        fp.write(item["content"])
+        except Exception as e:
+            session["checkpoint"] = {
+                "failed_step": 4, "task": task, "clone_duration": clone_duration,
+                "gather_duration": gather_duration, "ai_duration": ai_duration,
+                "file_map": file_map, "all_repo_paths": all_repo_paths,
+                "changed_files": changed_files, "summary": summary, "err_msg": str(e)
+            }
+            view = RetryFailedStepView(ctx.author.id, 4)
+            err_emb = discord.Embed(title="⚠️ Paused at Step 4 of 5 (Patching)", description=f"`{e}`", color=discord.Color.gold())
+            if status_msg:
+                await status_msg.edit(content=None, embed=err_emb, view=view)
+            else:
+                await ctx.send(embed=err_emb, view=view)
+            return
 
     # Step 5: Autonomous Build & Unit Testing Gate
-    step_history = [
-        f"✅ Step 1: Cloned `{repo}` (`{branch}`) in {clone_duration:.1f}s",
-        f"✅ Step 2: Indexed {len(file_map)} files{spotify_note}",
-        f"✅ Step 3: {used_model} synthesized precision patch in {ai_duration:.1f}s",
-        f"✅ Step 4: Applied {len(changed_files)} precision patch(es)",
-        "🔄 Step 5: Running autonomous build & unit test verification..."
-    ]
-    progress_embed = create_agent_progress_embed(
-        repo=repo,
-        model_label=model_label,
-        task=task,
-        step_num=5,
-        step_title="Autonomous Testing & Verification Gate",
-        percent=85,
-        steps_history=step_history,
-        current_thought="Executing test runner, checking syntax, and validating production build..."
-    )
-    await status_msg.edit(embed=progress_embed)
-
-    start_test = time.time()
-    test_passed, test_summary, test_details = await asyncio.to_thread(run_project_verification, work_dir)
-    test_duration = time.time() - start_test
-
-    # Autonomous Self-Healing Loop if test failed
-    healing_attempts = 0
-    max_healing_attempts = 2
-
-    while not test_passed and healing_attempts < max_healing_attempts:
-        healing_attempts += 1
-        heal_embed = create_agent_progress_embed(
+    try:
+        step_history = [
+            f"✅ Step 1: Cloned `{repo}` (`{branch}`) in {clone_duration:.1f}s",
+            f"✅ Step 2: Indexed {len(file_map)} files{spotify_note}",
+            f"✅ Step 3: {used_model} synthesized precision patch in {ai_duration:.1f}s",
+            f"✅ Step 4: Applied {len(changed_files)} precision patch(es)",
+            "🔄 Step 5: Running autonomous build & unit test verification..."
+        ]
+        progress_embed = create_agent_progress_embed(
             repo=repo,
             model_label=model_label,
             task=task,
             step_num=5,
-            step_title=f"Self-Healing Attempt {healing_attempts}/{max_healing_attempts}",
-            percent=90,
-            steps_history=step_history + [f"⚠️ Build test failed. AI analyzing compiler error to auto-fix..."],
-            current_thought=f"Compiler feedback: {test_summary[:200]}..."
+            step_title="Autonomous Testing & Verification Gate",
+            percent=85,
+            steps_history=step_history,
+            current_thought="Executing test runner, checking syntax, and validating production build..."
         )
-        await status_msg.edit(embed=heal_embed)
+        if status_msg:
+            await status_msg.edit(embed=progress_embed)
+        else:
+            status_msg = await ctx.send(embed=progress_embed)
 
-        heal_prompt = (
-            f"The previous change caused the build or test to FAIL with this error:\n"
-            f"```\n{test_details[:2500]}\n```\n"
-            f"Please inspect the error and project files, and return a precision patch to FIX this error completely.\n"
-            f"Return ONLY valid JSON with 'summary' and 'files' (using action='patch' or 'create')."
+        start_test = time.time()
+        test_passed, test_summary, test_details = await asyncio.to_thread(run_project_verification, work_dir)
+        test_duration = time.time() - start_test
+
+        healing_attempts = 0
+        max_healing_attempts = 2
+
+        while not test_passed and healing_attempts < max_healing_attempts:
+            healing_attempts += 1
+            heal_embed = create_agent_progress_embed(
+                repo=repo,
+                model_label=model_label,
+                task=task,
+                step_num=5,
+                step_title=f"Self-Healing Attempt {healing_attempts}/{max_healing_attempts}",
+                percent=90,
+                steps_history=step_history + [f"⚠️ Build test failed. AI analyzing compiler error to auto-fix..."],
+                current_thought=f"Compiler feedback: {test_summary[:200]}..."
+            )
+            await status_msg.edit(embed=heal_embed)
+
+            heal_prompt = (
+                f"The previous change caused the build or test to FAIL with this error:\n"
+                f"```\n{test_details[:2500]}\n```\n"
+                f"Please inspect the error and project files, and return a precision patch to FIX this error completely.\n"
+                f"Return ONLY valid JSON with 'summary' and 'files' (using action='patch' or 'create')."
+            )
+            try:
+                heal_resp, _ = await asyncio.to_thread(call_ai, heal_prompt, system_instruction, model_name)
+                heal_files = heal_resp.get("files", [])
+                for item in heal_files:
+                    rel_p = item.get("path")
+                    t_path = os.path.join(work_dir, rel_p)
+                    if "patches" in item:
+                        for patch in item["patches"]:
+                            apply_precision_patch(t_path, patch.get("target", ""), patch.get("replacement", ""))
+                    elif "content" in item:
+                        with open(t_path, "w", encoding="utf-8") as fp:
+                            fp.write(item["content"])
+
+                test_passed, test_summary, test_details = await asyncio.to_thread(run_project_verification, work_dir)
+            except Exception as e:
+                test_details += f"\nSelf-healing exception: {e}"
+                break
+
+        if not test_passed:
+            # Checkpoint saved so user can resume/retry Step 5
+            session["checkpoint"] = {
+                "failed_step": 5, "task": task, "clone_duration": clone_duration,
+                "gather_duration": gather_duration, "ai_duration": ai_duration,
+                "file_map": file_map, "all_repo_paths": all_repo_paths,
+                "changed_files": changed_files, "summary": summary, "err_msg": test_details
+            }
+            subprocess.run(["git", "checkout", "."], cwd=work_dir, capture_output=True)
+            subprocess.run(["git", "clean", "-fd"], cwd=work_dir, capture_output=True)
+            session["verified_build"] = False
+            session["pending_summary"] = None
+            session["pending_files"] = []
+
+            err_embed = discord.Embed(
+                title="🛡️ Production Safety Gate Blocked Push!",
+                description=(
+                    f"### ❌ Build / Unit Tests Failed\n"
+                    f"Your production code has been **automatically protected** and rolled back so that Render live users experience zero downtime.\n\n"
+                    f"**Compiler / Test Error:**\n```\n{test_details[:1000]}\n```"
+                ),
+                color=discord.Color.red()
+            )
+            err_embed.add_field(name="Project", value=f"`{repo}` (`{branch}`)", inline=True)
+            err_embed.add_field(name="Safety Action", value="Workspace rolled back to pristine HEAD", inline=True)
+            err_embed.set_footer(text="Aditya AI Dev • Tap Retry to re-run from Step 5")
+            view = RetryFailedStepView(ctx.author.id, 5)
+            await status_msg.edit(content=None, embed=err_embed, view=view)
+            return
+
+        # Tests PASSED! Mark verified and allow push
+        session["verified_build"] = True
+        session["pending_summary"] = summary
+        session["pending_files"] = changed_files
+        session["checkpoint"] = {}  # Clear checkpoint on 100% success
+
+        embed = discord.Embed(
+            title="🚀 Agentic Patch Complete & Verified!",
+            description=f"### {summary}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+            color=discord.Color.green()
         )
-        try:
-            heal_resp, _ = await asyncio.to_thread(call_ai, heal_prompt, system_instruction, model_name)
-            heal_files = heal_resp.get("files", [])
-            for item in heal_files:
-                rel_p = item.get("path")
-                t_path = os.path.join(work_dir, rel_p)
-                if "patches" in item:
-                    for patch in item["patches"]:
-                        apply_precision_patch(t_path, patch.get("target", ""), patch.get("replacement", ""))
-                elif "content" in item:
-                    with open(t_path, "w", encoding="utf-8") as fp:
-                        fp.write(item["content"])
-
-            test_passed, test_summary, test_details = await asyncio.to_thread(run_project_verification, work_dir)
-        except Exception as e:
-            test_details += f"\nSelf-healing exception: {e}"
-            break
-
-    if not test_passed:
-        # PRODUCTION SAFETY SHIELD: Rollback workspace to keep prod safe
-        subprocess.run(["git", "checkout", "."], cwd=work_dir, capture_output=True)
-        subprocess.run(["git", "clean", "-fd"], cwd=work_dir, capture_output=True)
-        session["verified_build"] = False
-        session["pending_summary"] = None
-        session["pending_files"] = []
-
-        err_embed = discord.Embed(
-            title="🛡️ Production Safety Gate Blocked Push!",
-            description=(
-                f"### ❌ Build / Unit Tests Failed\n"
-                f"Your production code has been **automatically protected** and rolled back so that Render live users experience zero downtime.\n\n"
-                f"**Compiler / Test Error:**\n```\n{test_details[:1200]}\n```"
-            ),
-            color=discord.Color.red()
+        embed.add_field(name="Target Project", value=f"`{repo}` (`{branch}`)", inline=True)
+        embed.add_field(name="AI Engine Used", value=f"`{used_model}`", inline=True)
+        embed.add_field(name="🧪 Automated Testing", value=f"✅ **{test_summary}** (verified in {test_duration:.1f}s)", inline=False)
+        file_bullets = "\n".join([f"• `{f['path']}`" for f in changed_files[:10]])
+        embed.add_field(name=f"Modified Files ({len(changed_files)})", value=file_bullets, inline=False)
+        embed.add_field(
+            name="Next Action on Mobile",
+            value="👉 Tap **[🚀 Push to GitHub & Deploy Live]** to publish to Render.\n👉 Tap **[📄 View Code Diff]** to preview changes on your phone.",
+            inline=False
         )
-        err_embed.add_field(name="Project", value=f"`{repo}` (`{branch}`)", inline=True)
-        err_embed.add_field(name="Safety Action", value="Workspace rolled back to pristine HEAD", inline=True)
-        err_embed.set_footer(text="Aditya AI Dev • Zero Prod Downtime Guarantee")
-        await status_msg.edit(content=None, embed=err_embed, view=None)
-        return
+        embed.set_footer(text="Aditya AI Dev • Build verified 100% clean • Safe to deploy")
 
-    # Tests PASSED! Mark verified and allow push
-    session["verified_build"] = True
-    session["pending_summary"] = summary
-    session["pending_files"] = changed_files
+        view = PushActionView(ctx.author.id)
+        await status_msg.edit(content=None, embed=embed, view=view)
 
-    # Step 5: Final Finished Dashboard
-    embed = discord.Embed(
-        title="🚀 Agentic Patch Complete & Verified!",
-        description=f"### {summary}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
-        color=discord.Color.green()
-    )
-    embed.add_field(name="Target Project", value=f"`{repo}` (`{branch}`)", inline=True)
-    embed.add_field(name="AI Engine Used", value=f"`{used_model}`", inline=True)
-    embed.add_field(name="🧪 Automated Testing", value=f"✅ **{test_summary}** (verified in {test_duration:.1f}s)", inline=False)
-    file_bullets = "\n".join([f"• `{f['path']}`" for f in changed_files[:10]])
-    embed.add_field(name=f"Modified Files ({len(changed_files)})", value=file_bullets, inline=False)
-    embed.add_field(
-        name="Next Action on Mobile",
-        value="👉 Tap **[🚀 Push to GitHub & Deploy Live]** to publish to Render.\n👉 Tap **[📄 View Code Diff]** to preview changes on your phone.",
-        inline=False
-    )
-    embed.set_footer(text="Aditya AI Dev • Build verified 100% clean • Safe to deploy")
-
-    view = PushActionView(ctx.author.id)
-    await status_msg.edit(content=None, embed=embed, view=view)
+    except Exception as e:
+        session["checkpoint"] = {
+            "failed_step": 5, "task": task, "clone_duration": clone_duration,
+            "gather_duration": gather_duration, "ai_duration": ai_duration,
+            "file_map": file_map, "all_repo_paths": all_repo_paths,
+            "changed_files": changed_files, "summary": summary, "err_msg": str(e)
+        }
+        view = RetryFailedStepView(ctx.author.id, 5)
+        err_emb = discord.Embed(title="⚠️ Paused at Step 5 of 5 (Testing)", description=f"`{e}`", color=discord.Color.gold())
+        if status_msg:
+            await status_msg.edit(content=None, embed=err_emb, view=view)
+        else:
+            await ctx.send(embed=err_emb, view=view)
 
 @bot.command(name="diff")
 async def diff_cmd(ctx):
@@ -1721,6 +1852,20 @@ async def reset_cmd(ctx):
     }
     await ctx.send("🧹 Session closed & reset. Type **`lets code`** anytime to start fresh!")
 
+@bot.command(name="retry")
+async def retry_cmd(ctx):
+    if not is_authorized(ctx.author):
+        return
+    session = get_session(ctx.author.id)
+    cp = session.get("checkpoint", {})
+    failed_step = cp.get("failed_step", 1)
+    task = cp.get("task")
+    if not task:
+        await ctx.send("ℹ️ No previous failed checkpoint found to retry. Start with `fix: <task>` or `lets code`!")
+        return
+    await ctx.send(f"🔄 Resuming execution from **Step {failed_step} of 5** (skipping earlier completed steps)...")
+    await code_cmd(ctx, task=task, resume_step=failed_step)
+
 # --- Natural Language Message Handler (ANY CASE: Lower, Upper, Mixed!) ---
 @bot.event
 async def on_message(message):
@@ -1747,6 +1892,20 @@ async def on_message(message):
 
         raw_content = message.content.strip()
         content_lower = raw_content.lower()
+
+        # Retry Trigger (Works in ANY case: retry, try again, resume, phir se karo, etc.)
+        if content_lower in ["retry", "try again", "retry step", "resume", "phir se karo", "phir se", "continue"]:
+            session = get_session(message.author.id)
+            cp = session.get("checkpoint", {})
+            failed_step = cp.get("failed_step", 1)
+            task = cp.get("task")
+            if task:
+                await message.channel.send(f"🔄 Resuming execution from **Step {failed_step} of 5** (skipping earlier completed steps)...")
+                await code_cmd(ctx, task=task, resume_step=failed_step)
+                return
+            else:
+                await message.channel.send("ℹ️ No previous failed checkpoint found to retry. Start with `fix: <task>` or `lets code`!")
+                return
 
         # 1. Clear Chat (Works in ANY case: CLEAR, Clear, clear chat, CLEAR CHAT, cls, CLS, clean)
         if content_lower in ["clear", "clear chat", "clearchat", "cls", "clean", "clean chat"]:
