@@ -66,6 +66,8 @@ def get_session(user_id):
             "chat_history": [],
             "last_suggested_task": None
         }
+    if user_sessions[user_id].get("active_model") in ["gemini-3.5-flash-lite", None]:
+        user_sessions[user_id]["active_model"] = "gemini-3.6-flash"
     if "chat_history" not in user_sessions[user_id]:
         user_sessions[user_id]["chat_history"] = []
     if "last_suggested_task" not in user_sessions[user_id]:
@@ -1347,10 +1349,12 @@ async def run_antigravity_cloud_agent(ctx, status_msg, session, repo, branch, ta
         "6. 'finish_task': {'summary': '<concise 1-2 sentence description of completed change>'}\n"
         "   Call this ONLY when changes are completed and run_verification has passed.\n\n"
         "CRITICAL AGENT RULES:\n"
+        "- NEVER call 'finish_task' on Turn 1 or before modifying files! You must actively inspect and edit code.\n"
+        "- NEVER just describe what to build in 'thought' and call finish_task. You MUST call grep_search/view_file and then replace_snippet/write_file to implement it!\n"
         "- STEP 1 (Inspect): Always use grep_search or view_file first to see the exact code. NEVER guess line content!\n"
-        "- STEP 2 (Edit): Use replace_snippet with exact lines. Never change parent wrapper classes or remove containers unless explicitly requested.\n"
+        "- STEP 2 (Edit): Use replace_snippet with exact lines to implement the user's requested changes.\n"
         "- STEP 3 (Verify): Call run_verification(). If it fails, read the error and fix it.\n"
-        "- STEP 4 (Finish): Call finish_task().\n\n"
+        "- STEP 4 (Finish): Call finish_task() ONLY after code has been edited and verified.\n\n"
         "RESPONSE SCHEMA:\n"
         "You MUST respond with a single JSON object in this format:\n"
         "{\n"
@@ -1452,6 +1456,21 @@ async def run_antigravity_cloud_agent(ctx, status_msg, session, repo, branch, ta
         elif tool_name == "finish_task":
             task_summary = args.get("summary", "Task completed")
             action_summary = "Signaled completion"
+            if not modified_files and turn < 6:
+                obs = (
+                    "CRITICAL: You called 'finish_task' without modifying any files! "
+                    "The user asked to build/fix something. You MUST first use 'grep_search' or 'view_file' to locate "
+                    "the code, then use 'replace_snippet' or 'write_file' to make the changes, and then call 'run_verification'. "
+                    "Do NOT call finish_task until files have been modified and verified."
+                )
+                history_log.append({
+                    "turn": turn,
+                    "tool": tool_name,
+                    "args": args,
+                    "summary": "Premature finish rejected (no files modified yet)",
+                    "observation": obs
+                })
+                continue
             if modified_files and not verification_passed:
                 v_res = await asyncio.to_thread(agent_tool_run_verification, work_dir)
                 verification_passed = (v_res["status"] == "PASSED")
