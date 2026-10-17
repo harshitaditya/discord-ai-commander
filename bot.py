@@ -36,12 +36,12 @@ DISCORD_USERNAME = os.environ.get("DISCORD_USERNAME", "aditya_ak02")
 
 # All supported AI Models (Active & Tested)
 ALL_MODELS = {
-    "gemini-3.5-flash-lite": "⚡ Gemini 3.5 Flash Lite (Ultra Fast & 0% Throttling) [DEFAULT]",
+    "gemini-3.6-flash": "⚡ Gemini 3.6 Flash (Super Fast & Smart Agent Engine) [DEFAULT]",
+    "gemini-3.1-pro": "🧠 Gemini 3.1 Pro (Deep Logic & Complex Architecture)",
+    "gemini-3.5-flash-lite": "⚡ Gemini 3.5 Flash Lite (Ultra Fast & 0% Throttling)",
     "gemini-3.5-flash": "🚀 Gemini 3.5 Flash (Flagship Speed & Capacity)",
-    "gemini-3.6-flash": "⚡ Gemini 3.6 Flash (Super Fast & Smart)",
     "gemini-3-flash-preview": "🛡️ Gemini 3 Flash Preview (Rock Solid Fallback)",
     "gemini-3.8-flash": "⚡ Gemini 3.8 Flash (Latest Flash)",
-    "gemini-3.1-pro": "🧠 Gemini 3.1 Pro (Deep Logic & Complex Architecture)",
     "gemini-4-argon": "🔮 Gemini 4 Argon (Next-Gen Autonomous Agentic Engine)",
     "claude-sonnet-4-6": "🎭 Claude Sonnet 4.6 (Elite Coding & Refactoring)",
     "claude-opus-4-6": "👑 Claude Opus 4.6 (Deep Architectural Reasoning)",
@@ -59,7 +59,7 @@ def get_session(user_id):
         user_sessions[user_id] = {
             "active_repo": None,
             "active_branch": "main",
-            "active_model": "gemini-3.5-flash-lite",
+            "active_model": "gemini-3.6-flash",
             "pending_summary": None,
             "pending_files": [],
             "work_dir": None,
@@ -422,13 +422,13 @@ def enrich_task_with_external_links(task_text):
 
     return task_text + extra_context
 
-def call_gemini(prompt, system_instruction, model_name="gemini-3.5-flash-lite"):
+def call_gemini(prompt, system_instruction, model_name="gemini-3.6-flash"):
     mapped_target = MODEL_ALIASES.get(model_name, model_name)
     active_fallbacks = [
+        "gemini-3.6-flash",
         "gemini-3.5-flash-lite",
         "gemini-3.5-flash",
-        "gemini-3-flash-preview",
-        "gemini-3.6-flash",
+        "gemini-flash-latest",
         "gemini-flash-lite-latest",
         "gemini-3.8-flash",
     ]
@@ -488,7 +488,7 @@ def call_anthropic(prompt, system_instruction, model_name="claude-3-7-sonnet-202
             text = text[:-3]
         return json.loads(text.strip()), model_name
 
-def call_ai(prompt, system_instruction, model_name="gemini-3.5-flash-lite"):
+def call_ai(prompt, system_instruction, model_name="gemini-3.6-flash"):
     """Unified AI caller supporting Gemini and Claude models."""
     if model_name in ["claude-sonnet-4-6", "claude-opus-4-6"]:
         if ANTHROPIC_API_KEY:
@@ -502,17 +502,17 @@ def call_ai(prompt, system_instruction, model_name="gemini-3.5-flash-lite"):
             f"You are {model_name}, an elite software engineer. "
             "Think deeply and generate clean, bug-free production-grade modifications. "
         )
-        return call_gemini(prompt, persona + system_instruction, "gemini-3.5-flash-lite")
+        return call_gemini(prompt, persona + system_instruction, "gemini-3.6-flash")
 
     return call_gemini(prompt, system_instruction, model_name)
 
-def call_gemini_text(prompt, system_instruction, model_name="gemini-3.5-flash-lite", chat_history=None):
+def call_gemini_text(prompt, system_instruction, model_name="gemini-3.6-flash", chat_history=None):
     mapped_target = MODEL_ALIASES.get(model_name, model_name)
     active_fallbacks = [
+        "gemini-3.6-flash",
         "gemini-3.5-flash-lite",
         "gemini-3.5-flash",
-        "gemini-3-flash-preview",
-        "gemini-3.6-flash",
+        "gemini-flash-latest",
         "gemini-flash-lite-latest",
         "gemini-3.8-flash",
     ]
@@ -1213,6 +1213,336 @@ async def model_cmd(ctx, model_name: str = None):
     )
     await ctx.send(embed=embed, view=view)
 
+# ==============================================================================
+# --- Antigravity Cloud Autonomous Tool-Calling Agent Engine ---
+# ==============================================================================
+
+def agent_tool_list_files(work_dir, max_files=80):
+    """Returns directory structure and all editable project files."""
+    ignored = {".git", "node_modules", "dist", "build", "venv", ".venv", "__pycache__", ".idea", ".vscode"}
+    files_list = []
+    for root, dirs, files in os.walk(work_dir):
+        dirs[:] = [d for d in dirs if d not in ignored]
+        for f in files:
+            ext = os.path.splitext(f)[1].lower()
+            if ext in [".js", ".jsx", ".ts", ".tsx", ".css", ".html", ".py", ".json", ".md", ".env.example", ".sh", ".yaml", ".yml"]:
+                rel = os.path.relpath(os.path.join(root, f), work_dir)
+                try:
+                    size = os.path.getsize(os.path.join(root, f))
+                    files_list.append(f"{rel} ({size} B)")
+                except Exception:
+                    files_list.append(rel)
+                if len(files_list) >= max_files:
+                    break
+    return files_list
+
+def agent_tool_grep_search(work_dir, query, path_filter=""):
+    """Searches for pattern or word across codebase with line numbers and snippets."""
+    if not query or len(query.strip()) == 0:
+        return ["Error: query cannot be empty"]
+    results = []
+    ignored = {".git", "node_modules", "dist", "build", "venv", ".venv", "__pycache__"}
+    q_lower = query.lower().strip()
+    for root, dirs, files in os.walk(work_dir):
+        dirs[:] = [d for d in dirs if d not in ignored]
+        for f in files:
+            full_p = os.path.join(root, f)
+            rel_p = os.path.relpath(full_p, work_dir)
+            if path_filter and path_filter.lower() not in rel_p.lower():
+                continue
+            ext = os.path.splitext(f)[1].lower()
+            if ext in [".png", ".jpg", ".ico", ".svg", ".zip", ".lock", ".bin", ".map", ".woff", ".woff2"]:
+                continue
+            try:
+                with open(full_p, "r", encoding="utf-8", errors="ignore") as fp:
+                    for i, line in enumerate(fp, 1):
+                        if q_lower in line.lower():
+                            results.append(f"{rel_p}:{i}: {line.strip()[:140]}")
+                            if len(results) >= 25:
+                                return results
+            except Exception:
+                pass
+    return results if results else [f"No occurrences of '{query}' found in repository."]
+
+def agent_tool_view_file(work_dir, file_path, start_line=1, end_line=80):
+    """Reads exact slice of lines from file with 1-based line numbers."""
+    full_p = os.path.join(work_dir, file_path)
+    if not os.path.exists(full_p):
+        return f"Error: File does not exist: {file_path}"
+    try:
+        with open(full_p, "r", encoding="utf-8", errors="ignore") as fp:
+            lines = fp.readlines()
+        total = len(lines)
+        if total == 0:
+            return f"[{file_path} is an empty file (0 lines)]"
+        start_idx = max(1, int(start_line))
+        requested_end = int(end_line) if end_line else start_idx + 60
+        end_idx = min(total, max(start_idx, requested_end))
+        if end_idx - start_idx > 100:
+            end_idx = start_idx + 100
+        numbered = [f"{i}: {lines[i-1].rstrip()}" for i in range(start_idx, end_idx + 1)]
+        header = f"[{file_path} (Lines {start_idx}-{end_idx} of {total})]"
+        return header + "\n" + "\n".join(numbered)
+    except Exception as e:
+        return f"Error reading {file_path}: {e}"
+
+def agent_tool_replace_snippet(work_dir, file_path, target_code, replacement_code):
+    """Precision non-destructive snippet replacement."""
+    full_p = os.path.join(work_dir, file_path)
+    ok, msg = apply_precision_patch(full_p, target_code, replacement_code)
+    if ok:
+        return f"SUCCESS: {msg} in {file_path}"
+    return f"FAILED: {msg}"
+
+def agent_tool_write_file(work_dir, file_path, content):
+    """Creates or overwrites a file cleanly."""
+    full_p = os.path.join(work_dir, file_path)
+    try:
+        os.makedirs(os.path.dirname(full_p), exist_ok=True)
+        with open(full_p, "w", encoding="utf-8") as fp:
+            fp.write(content)
+        return f"SUCCESS: Created/wrote {file_path} ({len(content)} chars)"
+    except Exception as e:
+        return f"FAILED to write {file_path}: {e}"
+
+def agent_tool_run_verification(work_dir):
+    """Runs build tests and static verification."""
+    passed, summary, details = run_project_verification(work_dir)
+    return {
+        "status": "PASSED" if passed else "FAILED",
+        "summary": summary,
+        "details": details[:1000]
+    }
+
+async def run_antigravity_cloud_agent(ctx, status_msg, session, repo, branch, task, model_name, work_dir, clone_duration):
+    model_label = ALL_MODELS.get(model_name, model_name)
+    files_list = await asyncio.to_thread(agent_tool_list_files, work_dir, 60)
+    file_list_str = "\n".join([f"- {f}" for f in files_list[:35]])
+    if len(files_list) > 35:
+        file_list_str += f"\n*(and {len(files_list) - 35} more project files)*"
+
+    history_log = []
+    modified_files = set()
+    max_turns = 8
+    turn = 0
+    verification_passed = False
+    task_summary = f"Completed: {task[:80]}"
+    last_thought = f"Analyzing {repo} repository structure..."
+    used_model = model_name
+
+    agent_system_instruction = (
+        "You are an Autonomous Antigravity Cloud Coding Agent operating inside a live git workspace.\n"
+        "You inspect, plan, write, and verify code directly in the repository with zero regressions.\n\n"
+        "AVAILABLE TOOLS:\n"
+        "1. 'grep_search': {'query': '<string to search>', 'path_filter': '<optional subpath>'}\n"
+        "   Use to locate classes, components, selectors, or variables in the codebase.\n"
+        "2. 'view_file': {'file_path': '<rel_path>', 'start_line': <int>, 'end_line': <int>}\n"
+        "   Use to inspect exact lines and surrounding DOM hierarchy before making edits.\n"
+        "3. 'replace_snippet': {'file_path': '<rel_path>', 'target_code': '<exact snippet>', 'replacement_code': '<new snippet>'}\n"
+        "   Replaces a target code snippet. PRESERVE parent containers, layout elements, and indentation.\n"
+        "4. 'write_file': {'file_path': '<rel_path>', 'content': '<full file content>'}\n"
+        "   Create a new file or add a new component/test.\n"
+        "5. 'run_verification': {}\n"
+        "   Executes build runner (e.g. Vite build, syntax checks, pytest). Call this after making changes!\n"
+        "6. 'finish_task': {'summary': '<concise 1-2 sentence description of completed change>'}\n"
+        "   Call this ONLY when changes are completed and run_verification has passed.\n\n"
+        "CRITICAL AGENT RULES:\n"
+        "- STEP 1 (Inspect): Always use grep_search or view_file first to see the exact code. NEVER guess line content!\n"
+        "- STEP 2 (Edit): Use replace_snippet with exact lines. Never change parent wrapper classes or remove containers unless explicitly requested.\n"
+        "- STEP 3 (Verify): Call run_verification(). If it fails, read the error and fix it.\n"
+        "- STEP 4 (Finish): Call finish_task().\n\n"
+        "RESPONSE SCHEMA:\n"
+        "You MUST respond with a single JSON object in this format:\n"
+        "{\n"
+        "  \"thought\": \"Your internal reasoning explaining what you are observing and why you are calling the tool\",\n"
+        "  \"tool\": \"grep_search\" | \"view_file\" | \"replace_snippet\" | \"write_file\" | \"run_verification\" | \"finish_task\",\n"
+        "  \"args\": { ... }\n"
+        "}"
+    )
+
+    while turn < max_turns:
+        turn += 1
+        turn_prompt = (
+            f"Repository: {repo} (branch: {branch})\n"
+            f"Task: {task}\n\n"
+            f"Workspace Files:\n{file_list_str}\n\n"
+        )
+        if history_log:
+            turn_prompt += "--- PREVIOUS AGENT ACTIONS & TOOL OBSERVATIONS ---\n"
+            for h in history_log[-5:]:
+                turn_prompt += f"[Turn {h['turn']} Tool Call]: {h['tool']}({json.dumps(h['args'])})\n"
+                turn_prompt += f"[Turn {h['turn']} Observation]:\n{h['observation']}\n\n"
+            turn_prompt += "--------------------------------------------------\n\n"
+        turn_prompt += f"Turn {turn}/{max_turns}: What is your next thought and tool call?"
+
+        try:
+            ai_resp, used_model = await asyncio.to_thread(call_ai, turn_prompt, agent_system_instruction, model_name)
+        except Exception as e:
+            log_event(f"Error in turn {turn}: {e}")
+            break
+
+        thought = ai_resp.get("thought", "Proceeding with next step...")
+        tool_name = ai_resp.get("tool", "")
+        args = ai_resp.get("args", {})
+        last_thought = thought
+
+        step_history = [
+            f"✅ Cloned `{repo}` (`{branch}`) in {clone_duration:.1f}s",
+        ]
+        for h in history_log:
+            step_history.append(f"✅ Turn {h['turn']}: `{h['tool']}` -> {h['summary']}")
+        step_history.append(f"🔄 Turn {turn}/{max_turns}: `{tool_name}`...")
+
+        progress_embed = create_agent_progress_embed(
+            repo=repo,
+            model_label=ALL_MODELS.get(used_model, used_model),
+            task=task,
+            step_num=turn,
+            step_title=f"Cloud Agent Turn {turn}/{max_turns}: {tool_name}",
+            percent=min(95, int(20 + (turn / max_turns) * 70)),
+            steps_history=step_history,
+            current_thought=thought[:220]
+        )
+        if status_msg:
+            try:
+                await status_msg.edit(embed=progress_embed)
+            except Exception:
+                pass
+
+        # Execute Tool
+        obs = ""
+        action_summary = ""
+
+        if tool_name == "grep_search":
+            q = args.get("query", "")
+            pf = args.get("path_filter", "")
+            matches = await asyncio.to_thread(agent_tool_grep_search, work_dir, q, pf)
+            obs = "\n".join(matches[:25])
+            action_summary = f"Found {len(matches)} match(es) for '{q}'"
+
+        elif tool_name == "view_file":
+            fp = args.get("file_path", "")
+            sl = args.get("start_line", 1)
+            el = args.get("end_line", 60)
+            obs = await asyncio.to_thread(agent_tool_view_file, work_dir, fp, sl, el)
+            action_summary = f"Viewed {fp} ({sl}-{el})"
+
+        elif tool_name == "replace_snippet":
+            fp = args.get("file_path", "")
+            tgt = args.get("target_code", "")
+            rep = args.get("replacement_code", "")
+            obs = await asyncio.to_thread(agent_tool_replace_snippet, work_dir, fp, tgt, rep)
+            if "SUCCESS" in obs:
+                modified_files.add(fp)
+            action_summary = f"Patched {fp}"
+
+        elif tool_name == "write_file":
+            fp = args.get("file_path", "")
+            cnt = args.get("content", "")
+            obs = await asyncio.to_thread(agent_tool_write_file, work_dir, fp, cnt)
+            modified_files.add(fp)
+            action_summary = f"Wrote {fp}"
+
+        elif tool_name == "run_verification":
+            v_res = await asyncio.to_thread(agent_tool_run_verification, work_dir)
+            verification_passed = (v_res["status"] == "PASSED")
+            obs = f"Status: {v_res['status']}\nSummary: {v_res['summary']}\nDetails: {v_res['details']}"
+            action_summary = f"Build {v_res['status']}: {v_res['summary'][:40]}"
+
+        elif tool_name == "finish_task":
+            task_summary = args.get("summary", "Task completed")
+            action_summary = "Signaled completion"
+            if modified_files and not verification_passed:
+                v_res = await asyncio.to_thread(agent_tool_run_verification, work_dir)
+                verification_passed = (v_res["status"] == "PASSED")
+                if not verification_passed:
+                    obs = f"Verification FAILED with error:\n{v_res['details']}\nPlease fix this before finishing."
+                    history_log.append({
+                        "turn": turn,
+                        "tool": tool_name,
+                        "args": args,
+                        "summary": "Verification failed, continuing self-healing",
+                        "observation": obs
+                    })
+                    continue
+            break
+
+        else:
+            obs = f"Unknown tool '{tool_name}'. Available: grep_search, view_file, replace_snippet, write_file, run_verification, finish_task"
+            action_summary = f"Unknown tool: {tool_name}"
+
+        history_log.append({
+            "turn": turn,
+            "tool": tool_name,
+            "args": args,
+            "summary": action_summary,
+            "observation": obs
+        })
+
+    # Final Verification check if files were modified
+    if modified_files and not verification_passed:
+        v_res = await asyncio.to_thread(agent_tool_run_verification, work_dir)
+        verification_passed = (v_res["status"] == "PASSED")
+
+    # Check git status for actual modified files
+    git_stat = subprocess.run(["git", "status", "--porcelain"], cwd=work_dir, capture_output=True, text=True)
+    actual_modified = [line.strip().split()[-1] for line in git_stat.stdout.splitlines() if line.strip()]
+
+    if not actual_modified and not modified_files:
+        embed = discord.Embed(
+            title="ℹ️ Antigravity Cloud Agent Completed",
+            description=f"### {last_thought}\n\nAgent analyzed repository and concluded no code modifications were necessary.",
+            color=discord.Color.blue()
+        )
+        embed.add_field(name="Project", value=f"`{repo}` (`{branch}`)", inline=True)
+        embed.add_field(name="Model", value=f"`{used_model}`", inline=True)
+        await status_msg.edit(content=None, embed=embed)
+        return
+
+    # Generate diff snippet
+    diff_res = subprocess.run(["git", "diff"], cwd=work_dir, capture_output=True, text=True)
+    diff_text = diff_res.stdout.strip()
+    diff_snippet = diff_text[:800] if diff_text else "No textual diff"
+
+    session["verified_build"] = verification_passed
+    session["pending_summary"] = task_summary
+    session["pending_files"] = [{"path": p} for p in (actual_modified or list(modified_files))]
+    session["checkpoint"] = {}
+
+    status_color = discord.Color.green() if verification_passed else discord.Color.orange()
+    embed = discord.Embed(
+        title="🚀 Antigravity Cloud Agent: Task Complete & Verified!" if verification_passed else "⚠️ Agent Changes Pending Verification",
+        description=f"### {task_summary}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+        color=status_color
+    )
+    embed.add_field(name="Target Project", value=f"`{repo}` (`{branch}`)", inline=True)
+    embed.add_field(name="AI Engine Used", value=f"`{used_model}` ({turn} tool turns)", inline=True)
+    embed.add_field(
+        name="🧪 Autonomous Test Gate",
+        value="✅ **Passed build & syntax checks**" if verification_passed else "⚠️ **Build check warning**",
+        inline=False
+    )
+    
+    file_bullets = "\n".join([f"• `{p}`" for p in (actual_modified or list(modified_files))[:8]])
+    embed.add_field(name=f"Modified Files ({len(actual_modified or modified_files)})", value=file_bullets, inline=False)
+    
+    if diff_snippet:
+        embed.add_field(
+            name="📄 Live Git Diff Preview",
+            value=f"```diff\n{diff_snippet}\n```",
+            inline=False
+        )
+
+    embed.add_field(
+        name="Next Action on Mobile",
+        value="👉 Tap **[🚀 Push to GitHub & Deploy Live]** to publish to Render.\n👉 Tap **[❌ Close / Discard]** to reset workspace.",
+        inline=False
+    )
+    embed.set_footer(text="Aditya AI Dev • Antigravity Cloud Tool-Calling Engine")
+
+    view = PushActionView(ctx.author.id)
+    await status_msg.edit(content=None, embed=embed, view=view)
+
 @bot.command(name="code")
 async def code_cmd(ctx, *, task: str, resume_step: int = 1):
     if not is_authorized(ctx.author):
@@ -1220,7 +1550,7 @@ async def code_cmd(ctx, *, task: str, resume_step: int = 1):
     session = get_session(ctx.author.id)
     repo = session.get("active_repo")
     branch = session.get("active_branch", "main")
-    model_name = session.get("active_model", "gemini-3.5-flash-lite")
+    model_name = session.get("active_model", "gemini-3.6-flash")
     model_label = ALL_MODELS.get(model_name, model_name)
 
     if not repo:
@@ -1299,332 +1629,21 @@ async def code_cmd(ctx, *, task: str, resume_step: int = 1):
                 await ctx.send(embed=err_emb, view=view)
             return
 
-    # Step 2: Indexing Files & Extracting External Context
-    if resume_step <= 2:
-        try:
-            step_history = [
-                f"✅ Step 1: Cloned `{repo}` (`{branch}`) in {clone_duration:.1f}s",
-                "🔄 Step 2: Indexing source files & extracting external playlist/doc references..."
-            ]
-            progress_embed = create_agent_progress_embed(
-                repo=repo,
-                model_label=model_label,
-                task=task,
-                step_num=2,
-                step_title="Indexing Files & Resolving Links",
-                percent=35,
-                steps_history=step_history,
-                current_thought="Checking for Spotify playlists, documentation URLs, and scanning code..."
-            )
-            if status_msg:
-                await status_msg.edit(embed=progress_embed)
-            else:
-                status_msg = await ctx.send(embed=progress_embed)
+    # Step 2: Extracting External Context & Links
+    enriched_task = await asyncio.to_thread(enrich_task_with_external_links, task)
 
-            start_gather = time.time()
-            enriched_task = await asyncio.to_thread(enrich_task_with_external_links, task)
-            file_map, all_repo_paths = await asyncio.to_thread(gather_repo_files, work_dir, task)
-            gather_duration = time.time() - start_gather
-
-            if "[EXTRACTED SPOTIFY PLAYLIST TRACKS" in enriched_task:
-                cnt = len(re.findall(r"^- ", enriched_task, re.MULTILINE))
-                spotify_note = f" (Extracted {cnt} Spotify tracks)"
-            else:
-                spotify_note = ""
-        except Exception as e:
-            session["checkpoint"] = {"failed_step": 2, "task": task, "clone_duration": clone_duration, "err_msg": str(e)}
-            view = RetryFailedStepView(ctx.author.id, 2)
-            err_emb = discord.Embed(title="⚠️ Paused at Step 2 of 5 (Indexing)", description=f"`{e}`", color=discord.Color.gold())
-            if status_msg:
-                await status_msg.edit(content=None, embed=err_emb, view=view)
-            else:
-                await ctx.send(embed=err_emb, view=view)
-            return
-
-    # Step 3: Neural Reasoning & Code Generation
-    if resume_step <= 3:
-        try:
-            file_list = "\n".join([f"- {p}" for p in all_repo_paths])
-            step_history = [
-                f"✅ Step 1: Cloned `{repo}` (`{branch}`) in {clone_duration:.1f}s",
-                f"✅ Step 2: Indexed {len(file_map)} priority files{spotify_note} in {gather_duration:.1f}s",
-                f"🔄 Step 3: Neural reasoning & synthesizing patch with {model_label}..."
-            ]
-            progress_embed = create_agent_progress_embed(
-                repo=repo,
-                model_label=model_label,
-                task=task,
-                step_num=3,
-                step_title="Agentic Reasoning & Patch Synthesis",
-                percent=65,
-                steps_history=step_history,
-                current_thought=f"Analyzing codebase and generating precision patch with {model_name}..."
-            )
-            if status_msg:
-                await status_msg.edit(embed=progress_embed)
-            else:
-                status_msg = await ctx.send(embed=progress_embed)
-
-            system_instruction = (
-                "You are an expert autonomous software engineer operating inside an Antigravity Agent Engine. "
-                "Analyze the project carefully and generate precision patches to fulfill the task with zero regressions.\n\n"
-                "CRITICAL RULES FOR PRESERVING CODE:\n"
-                "1. For EXISTING files, NEVER return the entire file content! Always use action='patch' with targeted 'target' and 'replacement' blocks.\n"
-                "   - 'target': The exact existing code block (including surrounding 1-2 lines for context) to find and replace.\n"
-                "   - 'replacement': The new code block that replaces it.\n"
-                "2. For NEW files only, use action='create' and provide 'content'.\n"
-                "3. For adding code to the end of a file (like CSS), use action='append' and provide 'content'.\n"
-                "4. Ensure JavaScript, JSX, CSS, and Python syntax is 100% complete and valid.\n\n"
-                "Return ONLY a JSON object in this exact schema:\n"
-                "{\n"
-                '  "summary": "Brief 1-2 sentence description of what was changed",\n'
-                '  "files": [\n'
-                '    {\n'
-                '      "path": "relative/path/to/file.ext",\n'
-                '      "action": "patch",\n'
-                '      "patches": [\n'
-                '        {\n'
-                '          "target": "<exact snippet of existing code to replace>",\n'
-                '          "replacement": "<new replacement code>"\n'
-                '        }\n'
-                '      ]\n'
-                '    }\n'
-                '  ]\n'
-                "}\n"
-            )
-
-            user_prompt = f"Repository: {repo}\nTask: {enriched_task}\n\nFiles in repo:\n{file_list}\n\nFile Contents:\n"
-            for p, c in file_map.items():
-                user_prompt += f"\n--- FILE: {p} ---\n{c}\n"
-
-            start_ai = time.time()
-            ai_response, used_model = await asyncio.to_thread(call_ai, user_prompt, system_instruction, model_name)
-            ai_duration = time.time() - start_ai
-
-            summary = ai_response.get("summary", "Code updated via Discord Commander")
-            changed_files = ai_response.get("files", [])
-
-            if not changed_files:
-                session["checkpoint"] = {"failed_step": 3, "task": task, "err_msg": "AI suggested no changes"}
-                view = RetryFailedStepView(ctx.author.id, 3)
-                await status_msg.edit(content=f"⚠️ AI did not suggest any changes.\n**Note:** {summary}", embed=None, view=view)
-                return
-        except Exception as e:
-            session["checkpoint"] = {
-                "failed_step": 3, "task": task, "clone_duration": clone_duration,
-                "gather_duration": gather_duration, "file_map": file_map, "all_repo_paths": all_repo_paths,
-                "err_msg": str(e)
-            }
-            view = RetryFailedStepView(ctx.author.id, 3)
-            err_emb = discord.Embed(title="⚠️ Paused at Step 3 of 5 (AI Synthesis)", description=f"`{e}`", color=discord.Color.gold())
-            if status_msg:
-                await status_msg.edit(content=None, embed=err_emb, view=view)
-            else:
-                await ctx.send(embed=err_emb, view=view)
-            return
-
-    # Step 4: Applying Patches to Disk
-    if resume_step <= 4:
-        try:
-            step_history = [
-                f"✅ Step 1: Cloned `{repo}` (`{branch}`) in {clone_duration:.1f}s",
-                f"✅ Step 2: Indexed {len(file_map)} files{spotify_note}",
-                f"✅ Step 3: {used_model} synthesized precision patch in {ai_duration:.1f}s",
-                f"🔄 Step 4: Applying {len(changed_files)} precision patch(es) to workspace..."
-            ]
-            progress_embed = create_agent_progress_embed(
-                repo=repo,
-                model_label=model_label,
-                task=task,
-                step_num=4,
-                step_title="Applying Precision Patches",
-                percent=70,
-                steps_history=step_history,
-                current_thought="Applying targeted non-destructive patches to codebase..."
-            )
-            if status_msg:
-                await status_msg.edit(embed=progress_embed)
-            else:
-                status_msg = await ctx.send(embed=progress_embed)
-
-            patch_errors = []
-            for item in changed_files:
-                rel_p = item.get("path")
-                target_path = os.path.join(work_dir, rel_p)
-                action = item.get("action", "patch" if "patches" in item else "write")
-
-                if action == "append":
-                    os.makedirs(os.path.dirname(target_path), exist_ok=True)
-                    with open(target_path, "a", encoding="utf-8") as fp:
-                        fp.write("\n" + item.get("content", ""))
-                elif action == "create" or not os.path.exists(target_path):
-                    os.makedirs(os.path.dirname(target_path), exist_ok=True)
-                    with open(target_path, "w", encoding="utf-8") as fp:
-                        fp.write(item.get("content", ""))
-                elif "patches" in item and item["patches"]:
-                    for patch in item["patches"]:
-                        t_code = patch.get("target", "")
-                        r_code = patch.get("replacement", "")
-                        ok, err = apply_precision_patch(target_path, t_code, r_code)
-                        if not ok:
-                            patch_errors.append(f"{rel_p}: {err}")
-                elif "content" in item and item["content"]:
-                    os.makedirs(os.path.dirname(target_path), exist_ok=True)
-                    with open(target_path, "w", encoding="utf-8") as fp:
-                        fp.write(item["content"])
-        except Exception as e:
-            session["checkpoint"] = {
-                "failed_step": 4, "task": task, "clone_duration": clone_duration,
-                "gather_duration": gather_duration, "ai_duration": ai_duration,
-                "file_map": file_map, "all_repo_paths": all_repo_paths,
-                "changed_files": changed_files, "summary": summary, "err_msg": str(e)
-            }
-            view = RetryFailedStepView(ctx.author.id, 4)
-            err_emb = discord.Embed(title="⚠️ Paused at Step 4 of 5 (Patching)", description=f"`{e}`", color=discord.Color.gold())
-            if status_msg:
-                await status_msg.edit(content=None, embed=err_emb, view=view)
-            else:
-                await ctx.send(embed=err_emb, view=view)
-            return
-
-    # Step 5: Autonomous Build & Unit Testing Gate
-    try:
-        step_history = [
-            f"✅ Step 1: Cloned `{repo}` (`{branch}`) in {clone_duration:.1f}s",
-            f"✅ Step 2: Indexed {len(file_map)} files{spotify_note}",
-            f"✅ Step 3: {used_model} synthesized precision patch in {ai_duration:.1f}s",
-            f"✅ Step 4: Applied {len(changed_files)} precision patch(es)",
-            "🔄 Step 5: Running autonomous build & unit test verification..."
-        ]
-        progress_embed = create_agent_progress_embed(
-            repo=repo,
-            model_label=model_label,
-            task=task,
-            step_num=5,
-            step_title="Autonomous Testing & Verification Gate",
-            percent=85,
-            steps_history=step_history,
-            current_thought="Executing test runner, checking syntax, and validating production build..."
-        )
-        if status_msg:
-            await status_msg.edit(embed=progress_embed)
-        else:
-            status_msg = await ctx.send(embed=progress_embed)
-
-        start_test = time.time()
-        test_passed, test_summary, test_details = await asyncio.to_thread(run_project_verification, work_dir)
-        test_duration = time.time() - start_test
-
-        healing_attempts = 0
-        max_healing_attempts = 2
-
-        while not test_passed and healing_attempts < max_healing_attempts:
-            healing_attempts += 1
-            heal_embed = create_agent_progress_embed(
-                repo=repo,
-                model_label=model_label,
-                task=task,
-                step_num=5,
-                step_title=f"Self-Healing Attempt {healing_attempts}/{max_healing_attempts}",
-                percent=90,
-                steps_history=step_history + [f"⚠️ Build test failed. AI analyzing compiler error to auto-fix..."],
-                current_thought=f"Compiler feedback: {test_summary[:200]}..."
-            )
-            await status_msg.edit(embed=heal_embed)
-
-            heal_prompt = (
-                f"The previous change caused the build or test to FAIL with this error:\n"
-                f"```\n{test_details[:2500]}\n```\n"
-                f"Please inspect the error and project files, and return a precision patch to FIX this error completely.\n"
-                f"Return ONLY valid JSON with 'summary' and 'files' (using action='patch' or 'create')."
-            )
-            try:
-                heal_resp, _ = await asyncio.to_thread(call_ai, heal_prompt, system_instruction, model_name)
-                heal_files = heal_resp.get("files", [])
-                for item in heal_files:
-                    rel_p = item.get("path")
-                    t_path = os.path.join(work_dir, rel_p)
-                    if "patches" in item:
-                        for patch in item["patches"]:
-                            apply_precision_patch(t_path, patch.get("target", ""), patch.get("replacement", ""))
-                    elif "content" in item:
-                        with open(t_path, "w", encoding="utf-8") as fp:
-                            fp.write(item["content"])
-
-                test_passed, test_summary, test_details = await asyncio.to_thread(run_project_verification, work_dir)
-            except Exception as e:
-                test_details += f"\nSelf-healing exception: {e}"
-                break
-
-        if not test_passed:
-            # Checkpoint saved so user can resume/retry Step 5
-            session["checkpoint"] = {
-                "failed_step": 5, "task": task, "clone_duration": clone_duration,
-                "gather_duration": gather_duration, "ai_duration": ai_duration,
-                "file_map": file_map, "all_repo_paths": all_repo_paths,
-                "changed_files": changed_files, "summary": summary, "err_msg": test_details
-            }
-            subprocess.run(["git", "checkout", "."], cwd=work_dir, capture_output=True)
-            subprocess.run(["git", "clean", "-fd"], cwd=work_dir, capture_output=True)
-            session["verified_build"] = False
-            session["pending_summary"] = None
-            session["pending_files"] = []
-
-            err_embed = discord.Embed(
-                title="🛡️ Production Safety Gate Blocked Push!",
-                description=(
-                    f"### ❌ Build / Unit Tests Failed\n"
-                    f"Your production code has been **automatically protected** and rolled back so that Render live users experience zero downtime.\n\n"
-                    f"**Compiler / Test Error:**\n```\n{test_details[:1000]}\n```"
-                ),
-                color=discord.Color.red()
-            )
-            err_embed.add_field(name="Project", value=f"`{repo}` (`{branch}`)", inline=True)
-            err_embed.add_field(name="Safety Action", value="Workspace rolled back to pristine HEAD", inline=True)
-            err_embed.set_footer(text="Aditya AI Dev • Tap Retry to re-run from Step 5")
-            view = RetryFailedStepView(ctx.author.id, 5)
-            await status_msg.edit(content=None, embed=err_embed, view=view)
-            return
-
-        # Tests PASSED! Mark verified and allow push
-        session["verified_build"] = True
-        session["pending_summary"] = summary
-        session["pending_files"] = changed_files
-        session["checkpoint"] = {}  # Clear checkpoint on 100% success
-
-        embed = discord.Embed(
-            title="🚀 Agentic Patch Complete & Verified!",
-            description=f"### {summary}\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
-            color=discord.Color.green()
-        )
-        embed.add_field(name="Target Project", value=f"`{repo}` (`{branch}`)", inline=True)
-        embed.add_field(name="AI Engine Used", value=f"`{used_model}`", inline=True)
-        embed.add_field(name="🧪 Automated Testing", value=f"✅ **{test_summary}** (verified in {test_duration:.1f}s)", inline=False)
-        file_bullets = "\n".join([f"• `{f['path']}`" for f in changed_files[:10]])
-        embed.add_field(name=f"Modified Files ({len(changed_files)})", value=file_bullets, inline=False)
-        embed.add_field(
-            name="Next Action on Mobile",
-            value="👉 Tap **[🚀 Push to GitHub & Deploy Live]** to publish to Render.\n👉 Tap **[📄 View Code Diff]** to preview changes on your phone.",
-            inline=False
-        )
-        embed.set_footer(text="Aditya AI Dev • Build verified 100% clean • Safe to deploy")
-
-        view = PushActionView(ctx.author.id)
-        await status_msg.edit(content=None, embed=embed, view=view)
-
-    except Exception as e:
-        session["checkpoint"] = {
-            "failed_step": 5, "task": task, "clone_duration": clone_duration,
-            "gather_duration": gather_duration, "ai_duration": ai_duration,
-            "file_map": file_map, "all_repo_paths": all_repo_paths,
-            "changed_files": changed_files, "summary": summary, "err_msg": str(e)
-        }
-        view = RetryFailedStepView(ctx.author.id, 5)
-        err_emb = discord.Embed(title="⚠️ Paused at Step 5 of 5 (Testing)", description=f"`{e}`", color=discord.Color.gold())
-        if status_msg:
-            await status_msg.edit(content=None, embed=err_emb, view=view)
-        else:
-            await ctx.send(embed=err_emb, view=view)
+    # Launch Antigravity Cloud Autonomous Tool-Calling Agent Loop
+    await run_antigravity_cloud_agent(
+        ctx=ctx,
+        status_msg=status_msg,
+        session=session,
+        repo=repo,
+        branch=branch,
+        task=enriched_task,
+        model_name=model_name,
+        work_dir=work_dir,
+        clone_duration=clone_duration
+    )
 
 @bot.command(name="diff")
 async def diff_cmd(ctx):

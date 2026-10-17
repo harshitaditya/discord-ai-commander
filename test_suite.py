@@ -206,6 +206,29 @@ with tempfile.TemporaryDirectory() as tmp_dir:
     report("Antigravity: Verification Runner Catches Syntax Error", not v_fail, f"Caught: {v_fail_summary}")
     os.remove(broken_py)
 
+    # --- 8. Test Antigravity Cloud Autonomous Agent Tools ---
+    print("\n[8] Testing Antigravity Cloud Autonomous Agent Tools...")
+    # Tool 1: list files
+    f_list = bot.agent_tool_list_files(tmp_dir)
+    report("Cloud Agent Tool: list_files", len(f_list) > 0, f"Found {len(f_list)} file(s)")
+
+    # Tool 2: grep_search
+    grep_res = bot.agent_tool_grep_search(tmp_dir, "newFeature")
+    report("Cloud Agent Tool: grep_search", len(grep_res) > 0 and "test_file.js" in grep_res[0], f"Result: {grep_res[0] if grep_res else 'None'}")
+
+    # Tool 3: view_file with line numbers
+    view_res = bot.agent_tool_view_file(tmp_dir, "test_file.js", 1, 10)
+    report("Cloud Agent Tool: view_file", "test_file.js (Lines 1-" in view_res and "1: // Header comment" in view_res, "Returned line-numbered slice")
+
+    # Tool 4: write_file
+    new_component = "export const TestComp = () => <div>Test</div>;"
+    write_res = bot.agent_tool_write_file(tmp_dir, "src/TestComp.jsx", new_component)
+    report("Cloud Agent Tool: write_file", "SUCCESS" in write_res and os.path.exists(os.path.join(tmp_dir, "src/TestComp.jsx")), write_res)
+
+    # Tool 5: replace_snippet via agent tool
+    rep_res = bot.agent_tool_replace_snippet(tmp_dir, "src/TestComp.jsx", "<div>Test</div>", "<span>Replaced</span>")
+    report("Cloud Agent Tool: replace_snippet", "SUCCESS" in rep_res, rep_res)
+
 print("\n==================================================")
 print(f"📊 SUMMARY: {passed_tests} PASSED, {failed_tests} FAILED")
 print("==================================================")
