@@ -68,7 +68,7 @@ except Exception as e:
 
 try:
     # Test StudioModelView with default model
-    model_view = bot.StudioModelView("gemini-3-flash-preview")
+    model_view = bot.StudioModelView("gemini-3.8-flash")
     report("StudioModelView instantiation", len(model_view.children) > 0, f"Models: {len(model_view.children[0].options)}")
 except Exception as e:
     report("StudioModelView instantiation", False, str(e))
@@ -120,14 +120,14 @@ except Exception as e:
 server.shutdown()
 
 # --- 5. Test AI Generation with Default Model ---
-print("\n[5] Testing AI Engine with Default Model (gemini-3-flash-preview)...")
+print("\n[5] Testing AI Engine with Default Model (gemini-3.8-flash)...")
 async def test_ai_call():
     try:
         ans = await asyncio.to_thread(
             bot.call_ai_text,
             "Reply with exactly the words: 'AI_TEST_SUCCESSFUL'",
             "You are a helpful coding assistant.",
-            "gemini-3-flash-preview"
+            "gemini-3.8-flash"
         )
         report("AI API Response", "AI_TEST_SUCCESSFUL" in ans or len(ans) > 0, f"Response: {ans[:60]}")
     except Exception as e:

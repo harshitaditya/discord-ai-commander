@@ -36,9 +36,10 @@ DISCORD_USERNAME = os.environ.get("DISCORD_USERNAME", "aditya_ak02")
 
 # All supported Heavy AI Models (Antigravity Agent Engines)
 ALL_MODELS = {
-    "gemini-3-flash-preview": "⚡ Gemini 3 Flash (High Quota & Heavy Agent Engine) [DEFAULT]",
-    "gemini-3.6-flash": "⚡ Gemini 3.6 Flash (Antigravity Agent Engine)",
-    "gemini-3.5-flash-lite": "🚀 Gemini 3.5 Flash Lite (Ultra Fast & 0% Throttling)",
+    "gemini-3.8-flash": "⚡ Gemini 3.8 Flash (Latest Antigravity Agent Engine) [DEFAULT]",
+    "gemini-3-flash-preview": "⚡ Gemini 3 Flash (High Quota & Heavy Coding)",
+    "gemini-3.6-flash": "🚀 Gemini 3.6 Flash (Antigravity Agent Engine)",
+    "gemini-3.5-flash-lite": "⚡ Gemini 3.5 Flash Lite (Ultra Fast & 0% Throttling)",
     "gemini-3.1-pro": "🧠 Gemini 3.1 Pro (Deep Logic & Complex Architecture)",
     "claude-opus-4-6": "👑 Claude Opus 4.6 (Deep Reasoning Engine)",
     "claude-sonnet-4-6": "🎭 Claude Sonnet 4.6 (Elite Refactoring Engine)",
@@ -56,7 +57,7 @@ def get_session(user_id):
         user_sessions[user_id] = {
             "active_repo": None,
             "active_branch": "main",
-            "active_model": "gemini-3-flash-preview",
+            "active_model": "gemini-3.8-flash",
             "pending_summary": None,
             "pending_files": [],
             "work_dir": None,
@@ -64,7 +65,7 @@ def get_session(user_id):
             "last_suggested_task": None
         }
     if user_sessions[user_id].get("active_model") not in ALL_MODELS:
-        user_sessions[user_id]["active_model"] = "gemini-3-flash-preview"
+        user_sessions[user_id]["active_model"] = "gemini-3.8-flash"
     if "chat_history" not in user_sessions[user_id]:
         user_sessions[user_id]["chat_history"] = []
     if "last_suggested_task" not in user_sessions[user_id]:
@@ -419,14 +420,14 @@ def enrich_task_with_external_links(task_text):
 
     return task_text + extra_context
 
-def call_gemini(prompt, system_instruction, model_name="gemini-3-flash-preview"):
+def call_gemini(prompt, system_instruction, model_name="gemini-3.8-flash"):
     mapped_target = MODEL_ALIASES.get(model_name, model_name)
     active_fallbacks = [
+        "gemini-3.8-flash",
         "gemini-3-flash-preview",
         "gemini-3.5-flash-lite",
         "gemini-flash-lite-latest",
         "gemini-3.1-flash-lite-preview",
-        "gemini-3.8-flash",
         "gemini-3.6-flash",
     ]
     models_to_try = [mapped_target] + [m for m in active_fallbacks if m != mapped_target]
@@ -485,7 +486,7 @@ def call_anthropic(prompt, system_instruction, model_name="claude-3-7-sonnet-202
             text = text[:-3]
         return json.loads(text.strip()), model_name
 
-def call_ai(prompt, system_instruction, model_name="gemini-3-flash-preview"):
+def call_ai(prompt, system_instruction, model_name="gemini-3.8-flash"):
     """Unified AI caller supporting Gemini and Claude models."""
     if model_name in ["claude-sonnet-4-6", "claude-opus-4-6"]:
         if ANTHROPIC_API_KEY:
@@ -499,18 +500,18 @@ def call_ai(prompt, system_instruction, model_name="gemini-3-flash-preview"):
             f"You are {model_name}, an elite software engineer. "
             "Think deeply and generate clean, bug-free production-grade modifications. "
         )
-        return call_gemini(prompt, persona + system_instruction, "gemini-3-flash-preview")
+        return call_gemini(prompt, persona + system_instruction, "gemini-3.8-flash")
 
     return call_gemini(prompt, system_instruction, model_name)
 
-def call_gemini_text(prompt, system_instruction, model_name="gemini-3-flash-preview", chat_history=None):
+def call_gemini_text(prompt, system_instruction, model_name="gemini-3.8-flash", chat_history=None):
     mapped_target = MODEL_ALIASES.get(model_name, model_name)
     active_fallbacks = [
+        "gemini-3.8-flash",
         "gemini-3-flash-preview",
         "gemini-3.5-flash-lite",
         "gemini-flash-lite-latest",
         "gemini-3.1-flash-lite-preview",
-        "gemini-3.8-flash",
         "gemini-3.6-flash",
     ]
     models_to_try = [mapped_target] + [m for m in active_fallbacks if m != mapped_target]
@@ -576,7 +577,7 @@ def call_anthropic_text(prompt, system_instruction, model_name="claude-3-7-sonne
         text = data["content"][0]["text"].strip()
         return text, model_name
 
-def call_ai_text(prompt, system_instruction, model_name="gemini-3.6-flash", chat_history=None):
+def call_ai_text(prompt, system_instruction, model_name="gemini-3.8-flash", chat_history=None):
     """Unified conversational AI caller returning markdown text."""
     if model_name in ["claude-sonnet-4-6", "claude-opus-4-6"]:
         if ANTHROPIC_API_KEY:
@@ -590,7 +591,7 @@ def call_ai_text(prompt, system_instruction, model_name="gemini-3.6-flash", chat
             f"You are {model_name}, a world-class senior staff software engineer and pair programmer. "
             "Help the user inspect their repository, design solutions, recommend architecture decisions, and write code.\n"
         )
-        return call_gemini_text(prompt, persona + system_instruction, "gemini-3.6-flash", chat_history)
+        return call_gemini_text(prompt, persona + system_instruction, "gemini-3.8-flash", chat_history)
 
     return call_gemini_text(prompt, system_instruction, model_name, chat_history)
 
@@ -709,7 +710,7 @@ class StudioRepoSelect(discord.ui.Select):
             color=discord.Color.blue()
         )
         embed.set_footer(text="Step 2 of 2: Select a Heavy Model from the menu below")
-        view = StudioModelView(session.get("active_model", "gemini-3.6-flash"))
+        view = StudioModelView(session.get("active_model", "gemini-3.8-flash"))
         await interaction.response.edit_message(embed=embed, view=view)
 
 class StudioRepoView(discord.ui.View):
@@ -774,7 +775,7 @@ class StudioControlView(discord.ui.View):
             await interaction.response.send_message("❌ This is not your session.", ephemeral=True)
             return
         session = get_session(self.user_id)
-        view = StudioModelView(session.get("active_model", "gemini-3.6-flash"))
+        view = StudioModelView(session.get("active_model", "gemini-3.8-flash"))
         embed = discord.Embed(
             title="🧠 Switch Heavy AI Model",
             description="Select which heavy coding engine you want to use:",
@@ -989,7 +990,7 @@ class PushActionView(discord.ui.View):
             await interaction.response.send_message("❌ This is not your session.", ephemeral=True)
             return
         session = get_session(self.user_id)
-        view = StudioModelView(session.get("active_model", "gemini-3.5-flash-lite"))
+        view = StudioModelView(session.get("active_model", "gemini-3.8-flash"))
         embed = discord.Embed(
             title="🧠 Switch AI Model",
             description="Select which model you want to use:",
@@ -1127,7 +1128,7 @@ class ChatDecisionView(discord.ui.View):
             await interaction.response.send_message("❌ This is not your session.", ephemeral=True)
             return
         session = get_session(self.user_id)
-        view = StudioModelView(session.get("active_model", "gemini-3.5-flash-lite"))
+        view = StudioModelView(session.get("active_model", "gemini-3.8-flash"))
         embed = discord.Embed(
             title="🧠 Switch AI Model",
             description="Select which model you want to use for coding & chat:",
@@ -1268,7 +1269,7 @@ async def model_cmd(ctx, model_name: str = None):
         return
 
     # Show interactive dropdown
-    view = StudioModelView(session.get("active_model", "gemini-3.6-flash"))
+    view = StudioModelView(session.get("active_model", "gemini-3.8-flash"))
     embed = discord.Embed(
         title="🧠 Choose AI Reasoning Engine",
         description="Select which model you want to write and fix your code:",
@@ -1460,7 +1461,7 @@ async def run_antigravity_cloud_agent(ctx, status_msg, session, repo, branch, ta
                     description=(
                         f"**Model `{model_name}` hit an error:**\n"
                         f"```{str(e)[:600]}```\n\n"
-                        f"💡 **Recommendation:** Switch to **`gemini-3.6-flash`** (Google's official agent engine) using the button below!"
+                        f"💡 **Recommendation:** Switch to **`gemini-3.8-flash`** or **`gemini-3-flash-preview`** using the button below!"
                     ),
                     color=discord.Color.red()
                 )
@@ -1677,7 +1678,7 @@ async def code_cmd(ctx, *, task: str, resume_step: int = 1):
     session = get_session(ctx.author.id)
     repo = session.get("active_repo")
     branch = session.get("active_branch", "main")
-    model_name = session.get("active_model", "gemini-3.6-flash")
+    model_name = session.get("active_model", "gemini-3.8-flash")
     model_label = ALL_MODELS.get(model_name, model_name)
 
     if not repo:
@@ -1813,7 +1814,7 @@ async def files_cmd(ctx):
 async def chat_with_agent(message, ctx, user_text):
     session = get_session(message.author.id)
     repo = session.get("active_repo")
-    model_name = session.get("active_model", "gemini-3.5-flash-lite")
+    model_name = session.get("active_model", "gemini-3.8-flash")
     model_label = ALL_MODELS.get(model_name, model_name)
 
     async with message.channel.typing():
@@ -1992,7 +1993,7 @@ async def reset_cmd(ctx):
     user_sessions[ctx.author.id] = {
         "active_repo": None,
         "active_branch": "main",
-        "active_model": "gemini-3.5-flash-lite",
+        "active_model": "gemini-3.8-flash",
         "pending_summary": None,
         "pending_files": [],
         "work_dir": None,
@@ -2179,7 +2180,7 @@ async def on_message(message):
             # Check if it's a simple greeting
             if content_lower in ["hi", "hello", "hey", "hii", "heyy", "sup", "yo", "kya haal hai", "kaise ho"]:
                 if active_repo:
-                    model = session.get("active_model", "gemini-3.6-flash")
+                    model = session.get("active_model", "gemini-3.8-flash")
                     await message.channel.send(
                         f"👋 Hey Aditya! Antigravity Pair-Programming is active on **`{active_repo}`** using **`{model}`**.\n"
                         f"Tell me what you'd like to inspect, build, or fix, or say `diff` / `push`!"
