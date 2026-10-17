@@ -383,11 +383,8 @@ def run_project_verification(work_dir):
 
 MODEL_ALIASES = {
     "gemini-3.1-pro": "gemini-3.1-pro-preview",
-    "gemini-2.5-pro": "gemini-3.6-flash",
-    "gemini-2.5-flash": "gemini-3.6-flash",
-    "gemini-2.0-flash": "gemini-3.6-flash",
-    "gemini-1.5-pro": "gemini-3.6-flash",
-    "gemini-1.5-flash": "gemini-3.6-flash",
+    "claude-opus-4-6": "gemini-3.6-flash",
+    "claude-sonnet-4-6": "gemini-3.6-flash",
 }
 
 def enrich_task_with_external_links(task_text):
@@ -424,8 +421,9 @@ def call_gemini(prompt, system_instruction, model_name="gemini-3.6-flash"):
     mapped_target = MODEL_ALIASES.get(model_name, model_name)
     active_fallbacks = [
         "gemini-3.6-flash",
-        "gemini-3.1-pro",
+        "gemini-3.1-pro-preview",
         "gemini-4-argon",
+        "gemini-2.5-pro",
         "gemini-2.5-flash",
     ]
     models_to_try = [mapped_target] + [m for m in active_fallbacks if m != mapped_target]
@@ -506,8 +504,9 @@ def call_gemini_text(prompt, system_instruction, model_name="gemini-3.6-flash", 
     mapped_target = MODEL_ALIASES.get(model_name, model_name)
     active_fallbacks = [
         "gemini-3.6-flash",
-        "gemini-3.1-pro",
+        "gemini-3.1-pro-preview",
         "gemini-4-argon",
+        "gemini-2.5-pro",
         "gemini-2.5-flash",
     ]
     models_to_try = [mapped_target] + [m for m in active_fallbacks if m != mapped_target]
@@ -1450,8 +1449,19 @@ async def run_antigravity_cloud_agent(ctx, status_msg, session, repo, branch, ta
         try:
             ai_resp, used_model = await asyncio.to_thread(call_ai, turn_prompt, agent_system_instruction, model_name)
         except Exception as e:
-            log_event(f"Error in turn {turn}: {e}")
-            break
+            log_event(f"❌ Error in agent turn {turn}: {e}")
+            if status_msg:
+                err_embed = discord.Embed(
+                    title="⚠️ AI Brain Execution Error",
+                    description=(
+                        f"**Model `{model_name}` hit an error:**\n"
+                        f"```{str(e)[:600]}```\n\n"
+                        f"💡 **Recommendation:** Switch to **`gemini-3.6-flash`** (Google's official agent engine) using the button below!"
+                    ),
+                    color=discord.Color.red()
+                )
+                await status_msg.edit(content=None, embed=err_embed, view=StudioControlView(ctx.author.id))
+            return
 
         thought = ai_resp.get("thought", "Proceeding with next step...")
         tool_name = ai_resp.get("tool", "")
@@ -1486,31 +1496,37 @@ async def run_antigravity_cloud_agent(ctx, status_msg, session, repo, branch, ta
         action_summary = ""
 
         if tool_name == "grep_search":
-            q = args.get("query", "")
-            pf = args.get("path_filter", "")
+            q = args.get("query") or args.get("search") or args.get("pattern") or ""
+            pf = args.get("path_filter") or args.get("filter") or args.get("path") or ""
             matches = await asyncio.to_thread(agent_tool_grep_search, work_dir, q, pf)
             obs = "\n".join(matches[:25])
             action_summary = f"Found {len(matches)} match(es) for '{q}'"
 
         elif tool_name == "view_file":
-            fp = args.get("file_path", "")
-            sl = args.get("start_line", 1)
-            el = args.get("end_line", 60)
+            fp = args.get("file_path") or args.get("path") or args.get("file") or args.get("filePath") or ""
+            try:
+                sl = int(args.get("start_line") or args.get("start") or 1)
+            except Exception:
+                sl = 1
+            try:
+                el = int(args.get("end_line") or args.get("end") or (sl + 60))
+            except Exception:
+                el = sl + 60
             obs = await asyncio.to_thread(agent_tool_view_file, work_dir, fp, sl, el)
             action_summary = f"Viewed {fp} ({sl}-{el})"
 
         elif tool_name == "replace_snippet":
-            fp = args.get("file_path", "")
-            tgt = args.get("target_code", "")
-            rep = args.get("replacement_code", "")
+            fp = args.get("file_path") or args.get("path") or args.get("file") or ""
+            tgt = args.get("target_code") or args.get("target") or args.get("find") or args.get("old_code") or ""
+            rep = args.get("replacement_code") or args.get("replacement") or args.get("replace") or args.get("new_code") or ""
             obs = await asyncio.to_thread(agent_tool_replace_snippet, work_dir, fp, tgt, rep)
             if "SUCCESS" in obs:
                 modified_files.add(fp)
             action_summary = f"Patched {fp}"
 
         elif tool_name == "write_file":
-            fp = args.get("file_path", "")
-            cnt = args.get("content", "")
+            fp = args.get("file_path") or args.get("path") or args.get("file") or ""
+            cnt = args.get("content") or args.get("code") or ""
             obs = await asyncio.to_thread(agent_tool_write_file, work_dir, fp, cnt)
             modified_files.add(fp)
             action_summary = f"Wrote {fp}"
