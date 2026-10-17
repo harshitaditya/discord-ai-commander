@@ -159,6 +159,53 @@ for trigger, expected in triggers_to_test:
     )
     report(f"Trigger match: '{trigger}'", is_match == expected, f"Result: {is_match}")
 
+# --- 7. Test Antigravity Engine: Precision Patching & Verification ---
+print("\n[7] Testing Antigravity Engine: Precision Patching & Verification...")
+import tempfile
+
+with tempfile.TemporaryDirectory() as tmp_dir:
+    sample_file = os.path.join(tmp_dir, "test_file.js")
+    original_code = (
+        "// Header comment\n"
+        "const x = 10;\n"
+        "function oldFeature() {\n"
+        "    return 'old_value';\n"
+        "}\n"
+        "const y = 20;\n"
+        "// Footer comment\n"
+    )
+    with open(sample_file, "w", encoding="utf-8") as f:
+        f.write(original_code)
+
+    # Test 1: Exact match patch
+    target_1 = "function oldFeature() {\n    return 'old_value';\n}"
+    replacement_1 = "function newFeature() {\n    return 'new_value';\n}"
+    ok_1, msg_1 = bot.apply_precision_patch(sample_file, target_1, replacement_1)
+    report("Antigravity: Exact Match Patch", ok_1, msg_1)
+
+    with open(sample_file, "r", encoding="utf-8") as f:
+        patched_code = f.read()
+    report("Antigravity: Unmodified Lines Preserved", "const x = 10;" in patched_code and "const y = 20;" in patched_code)
+    report("Antigravity: Replacement Applied Cleanly", "function newFeature()" in patched_code and "oldFeature" not in patched_code)
+
+    # Test 2: Whitespace-tolerant patch
+    target_2 = "const y = 20;\r\n// Footer comment"
+    replacement_2 = "const y = 200;\n// Updated Footer"
+    ok_2, msg_2 = bot.apply_precision_patch(sample_file, target_2, replacement_2)
+    report("Antigravity: Whitespace-Tolerant Patch", ok_2, msg_2)
+
+    # Test 3: Autonomous project verification runner
+    v_ok, v_summary, v_details = bot.run_project_verification(tmp_dir)
+    report("Antigravity: Verification Runner Success", v_ok, f"Summary: {v_summary}")
+
+    # Test 4: Verification runner catches syntax error
+    broken_py = os.path.join(tmp_dir, "broken.py")
+    with open(broken_py, "w", encoding="utf-8") as f:
+        f.write("def broken_syntax(:\n")  # Invalid syntax
+    v_fail, v_fail_summary, _ = bot.run_project_verification(tmp_dir)
+    report("Antigravity: Verification Runner Catches Syntax Error", not v_fail, f"Caught: {v_fail_summary}")
+    os.remove(broken_py)
+
 print("\n==================================================")
 print(f"📊 SUMMARY: {passed_tests} PASSED, {failed_tests} FAILED")
 print("==================================================")
