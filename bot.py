@@ -34,17 +34,13 @@ GH_PAT = os.environ.get("GH_PAT")
 GH_USERNAME = os.environ.get("GH_USERNAME", "harshitaditya")
 DISCORD_USERNAME = os.environ.get("DISCORD_USERNAME", "aditya_ak02")
 
-# All supported AI Models (Active & Tested)
+# All supported Heavy AI Models (Antigravity Agent Engines)
 ALL_MODELS = {
-    "gemini-3.6-flash": "⚡ Gemini 3.6 Flash (Super Fast & Smart Agent Engine) [DEFAULT]",
-    "gemini-3.1-pro": "🧠 Gemini 3.1 Pro (Deep Logic & Complex Architecture)",
-    "gemini-3.5-flash-lite": "⚡ Gemini 3.5 Flash Lite (Ultra Fast & 0% Throttling)",
-    "gemini-3.5-flash": "🚀 Gemini 3.5 Flash (Flagship Speed & Capacity)",
-    "gemini-3-flash-preview": "🛡️ Gemini 3 Flash Preview (Rock Solid Fallback)",
-    "gemini-3.8-flash": "⚡ Gemini 3.8 Flash (Latest Flash)",
-    "gemini-4-argon": "🔮 Gemini 4 Argon (Next-Gen Autonomous Agentic Engine)",
-    "claude-sonnet-4-6": "🎭 Claude Sonnet 4.6 (Elite Coding & Refactoring)",
-    "claude-opus-4-6": "👑 Claude Opus 4.6 (Deep Architectural Reasoning)",
+    "gemini-3.6-flash": "⚡ Gemini 3.6 Flash (Antigravity Heavy Agent Engine) [DEFAULT]",
+    "gemini-3.1-pro": "🧠 Gemini 3.1 Pro (Deep Logic & Complex Architecture - Heavy Coding)",
+    "gemini-4-argon": "🔮 Gemini 4 Argon (Next-Gen Autonomous Heavy Coding)",
+    "claude-sonnet-4-6": "🎭 Claude Sonnet 4.6 (Elite Refactoring & Architecture)",
+    "claude-opus-4-6": "👑 Claude Opus 4.6 (Maximum Reasoning & Heavy Coding)",
 }
 
 intents = discord.Intents.default()
@@ -66,7 +62,7 @@ def get_session(user_id):
             "chat_history": [],
             "last_suggested_task": None
         }
-    if user_sessions[user_id].get("active_model") in ["gemini-3.5-flash-lite", None]:
+    if user_sessions[user_id].get("active_model") not in ALL_MODELS:
         user_sessions[user_id]["active_model"] = "gemini-3.6-flash"
     if "chat_history" not in user_sessions[user_id]:
         user_sessions[user_id]["chat_history"] = []
@@ -428,11 +424,9 @@ def call_gemini(prompt, system_instruction, model_name="gemini-3.6-flash"):
     mapped_target = MODEL_ALIASES.get(model_name, model_name)
     active_fallbacks = [
         "gemini-3.6-flash",
-        "gemini-3.5-flash-lite",
-        "gemini-3.5-flash",
-        "gemini-flash-latest",
-        "gemini-flash-lite-latest",
-        "gemini-3.8-flash",
+        "gemini-3.1-pro",
+        "gemini-4-argon",
+        "gemini-2.5-flash",
     ]
     models_to_try = [mapped_target] + [m for m in active_fallbacks if m != mapped_target]
     last_err = None
@@ -512,11 +506,9 @@ def call_gemini_text(prompt, system_instruction, model_name="gemini-3.6-flash", 
     mapped_target = MODEL_ALIASES.get(model_name, model_name)
     active_fallbacks = [
         "gemini-3.6-flash",
-        "gemini-3.5-flash-lite",
-        "gemini-3.5-flash",
-        "gemini-flash-latest",
-        "gemini-flash-lite-latest",
-        "gemini-3.8-flash",
+        "gemini-3.1-pro",
+        "gemini-4-argon",
+        "gemini-2.5-flash",
     ]
     models_to_try = [mapped_target] + [m for m in active_fallbacks if m != mapped_target]
     last_err = None
@@ -581,7 +573,7 @@ def call_anthropic_text(prompt, system_instruction, model_name="claude-3-7-sonne
         text = data["content"][0]["text"].strip()
         return text, model_name
 
-def call_ai_text(prompt, system_instruction, model_name="gemini-3.5-flash-lite", chat_history=None):
+def call_ai_text(prompt, system_instruction, model_name="gemini-3.6-flash", chat_history=None):
     """Unified conversational AI caller returning markdown text."""
     if model_name in ["claude-sonnet-4-6", "claude-opus-4-6"]:
         if ANTHROPIC_API_KEY:
@@ -595,7 +587,7 @@ def call_ai_text(prompt, system_instruction, model_name="gemini-3.5-flash-lite",
             f"You are {model_name}, a world-class senior staff software engineer and pair programmer. "
             "Help the user inspect their repository, design solutions, recommend architecture decisions, and write code.\n"
         )
-        return call_gemini_text(prompt, persona + system_instruction, "gemini-3.5-flash-lite", chat_history)
+        return call_gemini_text(prompt, persona + system_instruction, "gemini-3.6-flash", chat_history)
 
     return call_gemini_text(prompt, system_instruction, model_name, chat_history)
 
@@ -706,14 +698,14 @@ class StudioRepoSelect(discord.ui.Select):
 
         # Advance to Step 2: Choose Model
         embed = discord.Embed(
-            title="🧠 Step 2 of 3: Choose AI Brain",
+            title="🧠 Step 2 of 2: Choose Heavy AI Brain",
             description=(
-                f"Selected Project: **`{selected_repo}`** (`main`)\n\n"
-                f"Choose the AI engine you want to use for writing & fixing code:"
+                f"Selected Repository: **`{selected_repo}`** (`main`)\n\n"
+                f"Choose the Heavy AI Coding Brain for autonomous inspection, editing & testing:"
             ),
             color=discord.Color.blue()
         )
-        embed.set_footer(text="Step 2 of 3: Select an AI Model from the menu below")
+        embed.set_footer(text="Step 2 of 2: Select a Heavy Model from the menu below")
         view = StudioModelView(session.get("active_model", "gemini-3.6-flash"))
         await interaction.response.edit_message(embed=embed, view=view)
 
@@ -732,7 +724,7 @@ class StudioModelSelect(discord.ui.Select):
                 default=(model_id == current_model),
                 description=f"Use {model_id}"
             ))
-        super().__init__(placeholder="🧠 Select an AI model...", min_values=1, max_values=1, options=options)
+        super().__init__(placeholder="🧠 Select a Heavy AI model...", min_values=1, max_values=1, options=options)
 
     async def callback(self, interaction: discord.Interaction):
         session = get_session(interaction.user.id)
@@ -740,25 +732,25 @@ class StudioModelSelect(discord.ui.Select):
         session["active_model"] = selected_model
         repo = session.get("active_repo", "your repository")
 
-        # Advance to Step 3: Prompt for Task with Control Buttons
+        # Session is now fully ACTIVE! No "Step 3" prompt for fix: required!
         embed = discord.Embed(
-            title="🎯 Step 3 of 3: Dev Studio Ready!",
+            title="🚀 Antigravity Dev Chain Active!",
             description=(
                 f"**Active Repository:** `{repo}` (`main`)\n"
-                f"**AI Engine:** `{selected_model}`\n\n"
+                f"**Heavy AI Engine:** `{selected_model}`\n\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"### 💬 What would you like to fix or build?\n\n"
-                f"Type your task in chat using the format:\n"
-                f"👉 **`fix: <describe your task>`**\n\n"
-                f"*(Works in any case: `fix:`, `FIX:`, `Fix:`)*\n\n"
-                f"**Examples:**\n"
-                f"• `fix: change navbar background to navy blue and add a login button`\n"
-                f"• `FIX: solve the audio pause issue on mobile`\n"
-                f"• `Fix: add an API health check endpoint`"
+                f"### 💬 Pair-Programming Mode: Ready!\n"
+                f"Type your instructions directly in chat — **no `fix:` prefix needed!**\n\n"
+                f"**Examples of what you can type:**\n"
+                f"• *dropdown upward open hona chahiye aur blur effect daal do*\n"
+                f"• *player me audio visualizer bar add karo*\n"
+                f"• *login modal button design match karo navbar se*\n"
+                f"• *run tests* or *diff* or *push*\n\n"
+                f"🧠 *Continuous multi-turn chain is active: follow-up prompts will build directly on your earlier changes!*"
             ),
-            color=discord.Color.purple()
+            color=discord.Color.brand_green()
         )
-        embed.set_footer(text="Type 'fix: <task>' in chat now to start coding!")
+        embed.set_footer(text="Antigravity Dev Chain • Type your task directly in chat!")
         view = StudioControlView(interaction.user.id)
         await interaction.response.edit_message(embed=embed, view=view)
 
@@ -768,12 +760,12 @@ class StudioModelView(discord.ui.View):
         self.add_item(StudioModelSelect(current_model))
 
 class StudioControlView(discord.ui.View):
-    """Control buttons for active workspace (Switch Model, Switch Repo, Restart, Close)."""
+    """Control buttons for active workspace (Switch Model, Switch Repo, View Diff, Push, Restart, Close)."""
     def __init__(self, user_id):
         super().__init__(timeout=600)
         self.user_id = user_id
 
-    @discord.ui.button(label="Switch Model", style=discord.ButtonStyle.blurple, emoji="🧠")
+    @discord.ui.button(label="Switch Model", style=discord.ButtonStyle.blurple, emoji="🧠", row=0)
     async def switch_model_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.user_id:
             await interaction.response.send_message("❌ This is not your session.", ephemeral=True)
@@ -781,13 +773,13 @@ class StudioControlView(discord.ui.View):
         session = get_session(self.user_id)
         view = StudioModelView(session.get("active_model", "gemini-3.6-flash"))
         embed = discord.Embed(
-            title="🧠 Switch AI Model",
-            description="Select which model you want to switch to:",
+            title="🧠 Switch Heavy AI Model",
+            description="Select which heavy coding engine you want to use:",
             color=discord.Color.blue()
         )
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
-    @discord.ui.button(label="Switch Repo", style=discord.ButtonStyle.gray, emoji="📁")
+    @discord.ui.button(label="Switch Repo", style=discord.ButtonStyle.gray, emoji="📁", row=0)
     async def switch_repo_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.user_id:
             await interaction.response.send_message("❌ This is not your session.", ephemeral=True)
@@ -801,7 +793,70 @@ class StudioControlView(discord.ui.View):
         )
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
-    @discord.ui.button(label="Restart Chat", style=discord.ButtonStyle.gray, emoji="🔄")
+    @discord.ui.button(label="View Diff", style=discord.ButtonStyle.secondary, emoji="📄", row=0)
+    async def view_diff_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("❌ This is not your session.", ephemeral=True)
+            return
+        session = get_session(self.user_id)
+        work_dir = session.get("work_dir")
+        repo = session.get("active_repo")
+        if not work_dir or not os.path.exists(work_dir):
+            await interaction.response.send_message("ℹ️ No active workspace changes yet. Type your task in chat!", ephemeral=True)
+            return
+        diff_embed = await asyncio.to_thread(generate_diff_embed, repo, work_dir)
+        await interaction.response.send_message(embed=diff_embed, ephemeral=True)
+
+    @discord.ui.button(label="Push & Deploy", style=discord.ButtonStyle.green, emoji="🚀", row=1)
+    async def push_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("❌ This is not your session.", ephemeral=True)
+            return
+        session = get_session(self.user_id)
+        work_dir = session.get("work_dir")
+        repo = session.get("active_repo")
+        branch = session.get("active_branch", "main")
+        summary = session.get("pending_summary", "Updated code via Discord Commander")
+
+        if not work_dir or not os.path.exists(work_dir) or not session.get("pending_files"):
+            await interaction.response.send_message("❌ No active changes found to push. Type a task in chat first!", ephemeral=True)
+            return
+
+        if not session.get("verified_build", False):
+            passed, test_summary, err = await asyncio.to_thread(run_project_verification, work_dir)
+            if not passed:
+                await interaction.response.send_message(
+                    f"🛡️ **Production Safety Gate Blocked Push:**\nCode failed build validation:\n```\n{err[:600]}\n```",
+                    ephemeral=True
+                )
+                return
+
+        await interaction.response.defer()
+        try:
+            commit_msg = f"{summary} [skip ci]" if "[skip ci]" in summary else summary
+            subprocess.run(["git", "config", "user.name", "Aditya (Discord Commander)"], cwd=work_dir, check=True)
+            subprocess.run(["git", "config", "user.email", "connect.aditya002@gmail.com"], cwd=work_dir, check=True)
+            subprocess.run(["git", "add", "-A"], cwd=work_dir, check=True)
+            subprocess.run(["git", "commit", "-m", commit_msg], cwd=work_dir, check=True)
+            push_res = subprocess.run(["git", "push", "origin", branch], cwd=work_dir, capture_output=True, text=True)
+            if push_res.returncode != 0:
+                await interaction.followup.send(f"❌ Git Push failed:\n```{push_res.stderr}```")
+                return
+            sha_res = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=work_dir, capture_output=True, text=True)
+            commit_sha = sha_res.stdout.strip()
+            session["pending_files"] = []
+            session["pending_summary"] = None
+            session["verified_build"] = False
+            embed = discord.Embed(
+                title="🚀 Live Deployment Triggered!",
+                description=f"Successfully pushed commit [`{commit_sha}`] to **`{repo}`** (`{branch}`).\nRender deployment pipeline triggered!",
+                color=discord.Color.green()
+            )
+            await interaction.followup.send(embed=embed)
+        except Exception as e:
+            await interaction.followup.send(f"❌ Error during push: `{e}`")
+
+    @discord.ui.button(label="Reset Chat", style=discord.ButtonStyle.gray, emoji="🔄", row=1)
     async def restart_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.user_id:
             await interaction.response.send_message("❌ This is not your session.", ephemeral=True)
@@ -812,10 +867,11 @@ class StudioControlView(discord.ui.View):
         session["active_repo"] = None
         session["pending_summary"] = None
         session["pending_files"] = []
-        await interaction.response.send_message("🔄 Restarting studio...", ephemeral=True)
-        await start_studio_flow(interaction.channel, self.user_id)
+        session["chat_history"] = []
+        session["last_suggested_task"] = None
+        await interaction.response.send_message("🔄 Workspace reset. Type `lets code` anytime to pick repo & model!", ephemeral=False)
 
-    @discord.ui.button(label="Close Chat", style=discord.ButtonStyle.red, emoji="❌")
+    @discord.ui.button(label="Close Chat", style=discord.ButtonStyle.red, emoji="❌", row=1)
     async def close_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.user_id:
             await interaction.response.send_message("❌ This is not your session.", ephemeral=True)
@@ -826,6 +882,8 @@ class StudioControlView(discord.ui.View):
         session["active_repo"] = None
         session["pending_summary"] = None
         session["pending_files"] = []
+        session["chat_history"] = []
+        session["last_suggested_task"] = None
         await interaction.response.send_message("👋 Chat session closed! Type `lets code` anytime to start again.", ephemeral=False)
 
 class PushActionView(discord.ui.View):
@@ -1109,7 +1167,7 @@ async def start_studio_flow(destination, user_id):
         ),
         color=discord.Color.brand_green()
     )
-    embed.set_footer(text="Step 1 of 3: Choose Repository")
+    embed.set_footer(text="Step 1 of 2: Choose Repository")
     view = StudioRepoView(repos)
     log_event(f"📤 Sending StudioRepoView with {len(repos[:25])} options to {destination}...")
     sent_msg = await destination.send(embed=embed, view=view)
@@ -1364,13 +1422,23 @@ async def run_antigravity_cloud_agent(ctx, status_msg, session, repo, branch, ta
         "}"
     )
 
+    chain_history = session.get("chat_history", [])
+    chain_str = ""
+    if chain_history:
+        chain_str = "--- CONVERSATION CHAIN & PREVIOUS TASKS IN THIS SESSION ---\n"
+        for item in chain_history[-4:]:
+            chain_str += f"• Previous Task: {item.get('task')}\n  Outcome: {item.get('summary')}\n  Files Modified: {item.get('files', [])}\n"
+        chain_str += "----------------------------------------------------------\n\n"
+
     while turn < max_turns:
         turn += 1
         turn_prompt = (
             f"Repository: {repo} (branch: {branch})\n"
-            f"Task: {task}\n\n"
+            f"Current Task: {task}\n\n"
             f"Workspace Files:\n{file_list_str}\n\n"
         )
+        if chain_str:
+            turn_prompt += chain_str
         if history_log:
             turn_prompt += "--- PREVIOUS AGENT ACTIONS & TOOL OBSERVATIONS ---\n"
             for h in history_log[-5:]:
@@ -1508,6 +1576,16 @@ async def run_antigravity_cloud_agent(ctx, status_msg, session, repo, branch, ta
     actual_modified = [line.strip().split()[-1] for line in git_stat.stdout.splitlines() if line.strip()]
 
     if not actual_modified and not modified_files:
+        if "chat_history" not in session:
+            session["chat_history"] = []
+        session["chat_history"].append({
+            "task": task,
+            "summary": task_summary,
+            "files": []
+        })
+        if len(session["chat_history"]) > 8:
+            session["chat_history"] = session["chat_history"][-8:]
+
         embed = discord.Embed(
             title="ℹ️ Antigravity Cloud Agent Completed",
             description=f"### {last_thought}\n\nAgent analyzed repository and concluded no code modifications were necessary.",
@@ -1527,6 +1605,16 @@ async def run_antigravity_cloud_agent(ctx, status_msg, session, repo, branch, ta
     session["pending_summary"] = task_summary
     session["pending_files"] = [{"path": p} for p in (actual_modified or list(modified_files))]
     session["checkpoint"] = {}
+
+    if "chat_history" not in session:
+        session["chat_history"] = []
+    session["chat_history"].append({
+        "task": task,
+        "summary": task_summary,
+        "files": [p for p in (actual_modified or list(modified_files))]
+    })
+    if len(session["chat_history"]) > 8:
+        session["chat_history"] = session["chat_history"][-8:]
 
     status_color = discord.Color.green() if verification_passed else discord.Color.orange()
     embed = discord.Embed(
@@ -1622,6 +1710,9 @@ async def code_cmd(ctx, *, task: str, resume_step: int = 1):
             status_msg = await ctx.send(embed=progress_embed)
 
             def _prepare_and_clone():
+                if os.path.exists(work_dir) and os.path.exists(os.path.join(work_dir, ".git")):
+                    # Workspace already active in chain! Preserve working files across turns
+                    return True, None
                 subprocess.run(["rm", "-rf", work_dir])
                 res = subprocess.run(["git", "clone", clone_url, work_dir], capture_output=True, text=True)
                 if res.returncode != 0:
@@ -1986,18 +2077,18 @@ async def on_message(message):
             await start_studio_flow(message.channel, message.author.id)
             return
 
-        # 7. "fix: <task>" handler (Works in ANY case: FIX:, Fix:, fIx:, fix <task>)
-        is_fix = False
+        # 7. Prefix-based task handler (Works in ANY case: fix:, add:, update:, change:, etc.)
+        is_prefixed = False
         task_desc = ""
-        for prefix in ["fix:", "fix :", "fix "]:
+        for prefix in ["fix:", "fix :", "fix ", "add:", "add ", "update:", "update ", "change:", "change ", "make:", "make ", "build:", "build "]:
             if content_lower.startswith(prefix):
-                is_fix = True
+                is_prefixed = True
                 task_desc = raw_content[len(prefix):].strip()
                 break
 
-        if is_fix:
+        if is_prefixed:
             if not task_desc:
-                await message.channel.send("⚠️ Please describe what you want to fix! Example: `fix: change hero button color to dark blue`")
+                await message.channel.send("⚠️ Please describe what you want to build or fix!")
                 return
             await code_cmd(ctx, task=task_desc)
             return
@@ -2014,7 +2105,7 @@ async def on_message(message):
                 await push_cmd(ctx)
                 return
             else:
-                await message.channel.send("💡 No pending recommendation to apply yet. Ask a question or use `fix: <task>`!")
+                await message.channel.send("💡 No pending recommendation to apply yet. Type your task in chat!")
                 return
 
         # 9. "diff" / "view diff" trigger
@@ -2061,8 +2152,34 @@ async def on_message(message):
             branch = parts[3] if len(parts) > 3 else "main"
             await set_repo_cmd(ctx, repo_name=repo_name, branch=branch)
         else:
-            # 13. Interactive Conversational Chat & Decision Making
-            await chat_with_agent(message, ctx, raw_content)
+            # 13. Antigravity IDE Continuous Pair-Programming Chain!
+            session = get_session(message.author.id)
+            active_repo = session.get("active_repo")
+
+            # Check if it's a simple greeting
+            if content_lower in ["hi", "hello", "hey", "hii", "heyy", "sup", "yo", "kya haal hai", "kaise ho"]:
+                if active_repo:
+                    model = session.get("active_model", "gemini-3.6-flash")
+                    await message.channel.send(
+                        f"👋 Hey Aditya! Antigravity Pair-Programming is active on **`{active_repo}`** using **`{model}`**.\n"
+                        f"Tell me what you'd like to inspect, build, or fix, or say `diff` / `push`!"
+                    )
+                else:
+                    await message.channel.send(
+                        "👋 Hey Aditya! Type **`lets code`** to select a repository and heavy model to start coding!"
+                    )
+                return
+
+            if active_repo:
+                # Direct Natural Language Task Execution into Antigravity Chain!
+                log_event(f"🎯 Direct Antigravity IDE chain prompt on {active_repo}: '{raw_content}'")
+                await code_cmd(ctx, task=raw_content)
+            else:
+                # No repo active -> prompt to pick repo
+                await message.channel.send(
+                    "📁 No repository selected yet! Please choose a repository from the menu below:"
+                )
+                await start_studio_flow(message.channel, message.author.id)
 
     except Exception as e:
         import traceback
